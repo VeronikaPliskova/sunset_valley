@@ -60,7 +60,13 @@ aside{display:flex;flex-direction:column;gap:16px;min-width:0}
 .mapwrap.fs{position:fixed;inset:0;z-index:5000;border-radius:0;background:var(--sea)}
 .mapwrap.fs #map{height:100vh;height:100dvh;border:0;border-radius:0}
 .fs-lock,.fs-lock body{overflow:hidden}
-#b-fs .i-close{display:none}
+#b-fs .i-close,.v-fs .i-close{display:none}
+.v-fs[aria-pressed="true"] .i-open{display:none}
+.v-fs[aria-pressed="true"] .i-close{display:block}
+.v-fs{position:absolute;right:12px;bottom:12px;z-index:8;width:34px;height:34px;border-radius:8px;border:2px solid rgba(0,0,0,.2);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;padding:0;background-clip:padding-box}
+.v-fs:hover{background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.v-fs:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.viewer.fs{position:fixed;inset:0;z-index:5000;height:100vh;height:100dvh;border:0;border-radius:0}
 #b-fs[aria-pressed="true"] .i-open{display:none}
 #b-fs[aria-pressed="true"] .i-close{display:block}
 .m-info{position:absolute;top:12px;right:56px;z-index:1002;width:min(280px,calc(100% - 80px));max-height:calc(100% - 24px);overflow:auto;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 26px rgba(0,0,0,.22)}
@@ -874,8 +880,9 @@ html{scroll-behavior:smooth}
   .v-tools{top:8px;right:8px;padding:8px 10px;gap:6px}
   .v-tools label{font-size:.82rem}
   .v-tools .btn.ghost{padding:5px 8px;font-size:.82rem}
-  .v-help{left:8px;right:8px;bottom:8px;font-size:.72rem}
-  .v-info{top:auto;bottom:8px;left:8px;right:8px;width:auto;max-height:60%;overflow:auto;z-index:7}
+  .v-help{left:8px;right:50px;bottom:8px;font-size:.72rem}
+  .v-fs{right:8px;bottom:8px}
+  .v-info{top:auto;bottom:50px;left:8px;right:8px;width:auto;max-height:60%;overflow:auto;z-index:7}
   .poster-card{padding:14px 16px}
   .postup{padding-block:0 36px}
   .foot{font-size:.76rem}
@@ -948,6 +955,10 @@ html{scroll-behavior:smooth}
     <p>Celé údolí v prostoru: terén z výškové mapy hry, velké budovy a parcely s domy. Na budovu nebo pozemek můžeš kliknout.</p>
   </div>
   <div class="viewer" id="viewer">
+    <button type="button" class="v-fs" id="v-fs" aria-pressed="false" title="3D na celou obrazovku" aria-label="3D na celou obrazovku">
+      <svg class="i-open" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      <svg class="i-close" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+    </button>
     <div class="poster" id="poster">
       <div class="poster-card">
         <strong>Prohlížeč 3D modelu</strong>
@@ -1151,6 +1162,19 @@ html{scroll-behavior:smooth}
 <script>
 (function(){
   const viewer=document.getElementById('viewer'), start=document.getElementById('start3d');
+  // 3D na celé okno
+  const vfs=document.getElementById('v-fs');
+  function setVfs(on){
+    viewer.classList.toggle('fs',on); document.documentElement.classList.toggle('fs-lock',on);
+    vfs.setAttribute('aria-pressed',on); const t=on?'Zmenšit 3D zobrazení':'3D na celou obrazovku'; vfs.title=t; vfs.setAttribute('aria-label',t);
+  }
+  vfs.addEventListener('click',()=>{
+    const on=!viewer.classList.contains('fs');
+    if(on){ setVfs(true); if(viewer.requestFullscreen) viewer.requestFullscreen().catch(()=>{}); }
+    else { if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); setVfs(false); }
+  });
+  document.addEventListener('fullscreenchange',()=>{ if(!document.fullscreenElement&&viewer.classList.contains('fs')) setVfs(false); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&viewer.classList.contains('fs')&&!document.fullscreenElement) setVfs(false); });
   const libs=['https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js','https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js','https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js'];
   function load(src){return new Promise((ok,err)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>err(new Error(src));document.head.appendChild(s);});}
   function status(t){let el=viewer.querySelector('.v-status'); if(!t){el&&el.remove();return;} if(!el){el=document.createElement('div');el.className='v-status';viewer.appendChild(el);} el.textContent=t;}
