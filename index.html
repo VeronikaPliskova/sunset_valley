@@ -111,6 +111,7 @@ html{scroll-behavior:smooth}
 
 /* --------------------------------------------------------------------------
    3) LEAFLET – základní styly knihovny pro 2D mapu (převzato z leaflet.css 1.9.4).
+      Tuto část NEUPRAVUJ. Vlastní úpravy vzhledu mapy jsou až v blocích 6–10.
    -------------------------------------------------------------------------- */
 .leaflet-pane,
 .leaflet-tile,
@@ -951,6 +952,13 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 .v-tools{position:absolute;top:12px;right:12px;z-index:5;display:flex;flex-direction:column;gap:8px;align-items:stretch;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .v-tools label{display:flex;gap:8px;align-items:center;font-size:.9rem;cursor:pointer}
 .v-tools input{accent-color:var(--accent)}
+.v-tools-h{all:unset;cursor:pointer;font-family:var(--display);font-weight:700;font-size:1rem;margin-bottom:-2px;display:flex;justify-content:space-between;gap:10px}   /* nadpis „Vrstvy“ = tlačítko sbalit/rozbalit */
+.v-tools-h:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.v-tools-h span{transition:transform .2s}
+.v-tools.closed .v-tools-h span{transform:rotate(-90deg)}
+.v-tools.closed>:not(.v-tools-h){display:none}   /* sbalený panel ukazuje jen nadpis */
+.v-tools.closed .v-tools-h{margin:0}
+.v-tools .sw{width:16px;height:11px;flex:none}                            /* barevný čtvereček vrstvy */
 .v-help{position:absolute;left:12px;bottom:12px;z-index:5;font-size:.8rem;color:var(--fg);background:color-mix(in srgb,var(--surface) 88%,transparent);border-radius:8px;padding:5px 9px}  /* nápověda vlevo dole */
 .v-status{position:absolute;inset:auto 0 0 0;margin:auto;top:0;height:max-content;width:max-content;max-width:86%;z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:.92rem}  /* hláška „Načítám…“ uprostřed */
 /* karta budovy ve 3D (vlevo nahoře) */
@@ -1019,7 +1027,8 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
   .s3d{padding-block:18px 28px}
   .viewer{height:clamp(360px,70vh,600px)}
   .v-tools{top:8px;right:8px;padding:8px 10px;gap:6px}
-  .v-tools label{font-size:.82rem}
+  .v-tools label{font-size:.8rem;gap:6px}
+  .v-tools-h{font-size:.9rem}
   .v-tools .btn.ghost{padding:5px 8px;font-size:.82rem}
   .v-help{left:8px;right:50px;bottom:8px;font-size:.72rem}
   .v-fs{right:8px;bottom:8px}
@@ -1608,30 +1617,65 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     // když se změní velikost okna (např. celá obrazovka), přepočítá se obraz
     new ResizeObserver(()=>{renderer.setSize(W(),H());camera.aspect=W()/H();camera.updateProjectionMatrix();}).observe(viewer);
 
+    /* ---- údaje o pozemcích z data.js (pro rozdělení do vrstev a pro karty po kliknutí) ---- */
+    const data=window.SV_DATA;
+    const byLot={}; data.features.forEach(f=>{if(f.properties.kind==='lot') byLot[f.properties.interni]=f.properties;});          // pozemky podle interního jména
+    const pubB={}; data.features.forEach(f=>{const q=f.properties; if(q.kind==='bld'&&q.verejna) pubB[q.title]=q;});              // veřejné budovy podle názvu
+
+    /* ---- vrstvy 3D modelu ----
+       Každá vrstva je skupina objektů, kterou jde zapnout/vypnout zaškrtávátkem.
+       barva = čtvereček v ovládacím panelu (stejné barvy jako legenda 2D mapy) */
+    const LAYERS=[
+      {key:'prazdne', label:'Prázdné pozemky',   color:'var(--lot-empty)'},
+      {key:'domy',    label:'Rodinné domy',      color:'var(--lot-house)'},
+      {key:'budovy',  label:'Veřejné budovy',    color:'var(--bld-public)'},   // radnice, nemocnice, škola, stadion…
+      {key:'mista',   label:'Veřejná místa',     color:'var(--lot-public)'},   // parky, pláže, jezírka, knihovna, posilovna, maják…
+      {key:'zakladna',label:'Vojenská základna', color:'#7d7a5c'}              // základna + raketová rampa
+    ];
+    const groups={};
+    LAYERS.forEach(ly=>{ groups[ly.key]=new THREE.Group(); scene.add(groups[ly.key]); });
+
+    // do které vrstvy patří jeden objekt modelu (podle údajů uložených v modelu: userData.lot / userData.budova)
+    function layerOf(u){
+      if(u.lot==='militarybase'||u.budova==='Raketová rampa'||u.budova==='Vojenska_zakladna') return 'zakladna';
+      if(u.budova==='Maják') return 'mista';
+      if(u.budova) return 'budovy';                       // velké veřejné budovy z budovy_a / budovy_b
+      const typ=(byLot[u.lot]||{}).typ;                   // parcely: podle typu pozemku v data.js
+      if(typ==='Prázdný pozemek') return 'prazdne';
+      if(typ==='Rodinný dům') return 'domy';
+      if(typ==='Veřejná budova') return 'budovy';
+      return 'mista';                                     // Veřejné místo
+    }
+
     /* ---- modely budov a parcel (formát GLB) ----
-       budovy_a, budovy_b = velké veřejné budovy; ostatni = maják, raketa…; parcely = pozemky s domy */
+       budovy_a, budovy_b = velké veřejné budovy; ostatni = maják a raketa; parcely = všech 92 pozemků
+       Každý soubor obsahuje víc objektů (jeden na pozemek / budovu); po načtení se rozdělí do vrstev. */
     const loader=new THREE.GLTFLoader();
-    const groups={budovy:new THREE.Group(),parcely:new THREE.Group()};   // dvě skupiny kvůli zapínání/vypínání
-    scene.add(groups.budovy,groups.parcely);
-    const files=[['budovy_a','budovy'],['budovy_b','budovy'],['ostatni','budovy'],['parcely','parcely']];
+    const files=['budovy_a','budovy_b','ostatni','parcely'];
     let done=0;
     status('Načítám budovy a parcely… 0 / '+files.length);
-    await Promise.all(files.map(([f,grp])=>bin(f).then(ab=>new Promise((ok)=>loader.parse(ab,'',gl=>{
+    await Promise.all(files.map(f=>bin(f).then(ab=>new Promise((ok)=>loader.parse(ab,'',gl=>{
       gl.scene.traverse(o=>{ if(o.isMesh){ o.material.side=THREE.DoubleSide; if(o.material.map) o.material.map.anisotropy=4; } });
-      groups[grp].add(gl.scene);
+      // rozdělení objektů do vrstev
+      [...gl.scene.children].forEach(o=>groups[layerOf(o.userData||{})].add(o));
       done++; status('Načítám budovy a parcely… '+done+' / '+files.length); ok();
     },e=>{console.error(e);done++;ok();}))).catch(e=>{console.error(e);done++;})));
     status(null);   // vše načteno, hláška zmizí
 
     /* ---- ovládací panel vpravo nahoře ---- */
+    // zaškrtávátko pro každou vrstvu (s barevným čtverečkem) + moře + tlačítko výchozího pohledu
     const tools=document.createElement('div'); tools.className='v-tools';
-    tools.innerHTML='<label for="v-b"><input type="checkbox" id="v-b" checked> Budovy</label>'+
-                    '<label for="v-p"><input type="checkbox" id="v-p" checked> Parcely</label>'+
-                    '<label for="v-s"><input type="checkbox" id="v-s" checked> Moře</label>'+
-                    '<button class="btn ghost" id="v-home" type="button">Výchozí pohled</button>';
+    tools.innerHTML='<button type="button" class="v-tools-h" aria-expanded="true">Vrstvy <span aria-hidden="true">▾</span></button>'+
+      LAYERS.map(ly=>'<label for="v-'+ly.key+'"><input type="checkbox" id="v-'+ly.key+'" checked><span class="sw" style="background:'+ly.color+'"></span>'+ly.label+'</label>').join('')+
+      '<label for="v-s"><input type="checkbox" id="v-s" checked><span class="sw" style="background:#9ccbe6"></span>Moře</label>'+
+      '<button class="btn ghost" id="v-home" type="button">Výchozí pohled</button>';
     viewer.appendChild(tools);
-    tools.querySelector('#v-b').addEventListener('change',e=>groups.budovy.visible=e.target.checked);
-    tools.querySelector('#v-p').addEventListener('change',e=>groups.parcely.visible=e.target.checked);
+    // nadpis „Vrstvy“ panel sbalí / rozbalí; na telefonu je panel na začátku sbalený, aby nezakrýval model
+    const th=tools.querySelector('.v-tools-h');
+    function setToolsOpen(o){ tools.classList.toggle('closed',!o); th.setAttribute('aria-expanded',o); }
+    th.addEventListener('click',()=>setToolsOpen(tools.classList.contains('closed')));
+    if(window.innerWidth<700) setToolsOpen(false);
+    LAYERS.forEach(ly=>tools.querySelector('#v-'+ly.key).addEventListener('change',e=>{ groups[ly.key].visible=e.target.checked; if(!e.target.checked) closeInfo(); }));
     tools.querySelector('#v-s').addEventListener('change',e=>sea.visible=e.target.checked);
     tools.querySelector('#v-home').addEventListener('click',()=>{camera.position.copy(HOME.pos);ctl.target.copy(HOME.tgt);});
 
@@ -1642,10 +1686,7 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 
     /* ---- klikání na budovy a pozemky ve 3D ----
        Každý model má v sobě uložené, ke kterému pozemku patří (userData.lot) nebo jaká je to budova (userData.budova).
-       Podle toho se najdou údaje v data.js a ukáže se stejná karta jako na mapě. */
-    const data=window.SV_DATA;
-    const byLot={}; data.features.forEach(f=>{if(f.properties.kind==='lot') byLot[f.properties.interni]=f.properties;});          // pozemky podle interního jména
-    const pubB={}; data.features.forEach(f=>{const q=f.properties; if(q.kind==='bld'&&q.verejna) pubB[q.title]=q;});              // veřejné budovy podle názvu
+       Podle toho se najdou údaje v data.js (byLot, pubB výše) a ukáže se stejná karta jako na mapě. */
     // převod názvů budov z 3D modelů na české názvy v datech
     const czMap={Radnice:'Radnice',Skola:'Škola',Jidelna:'Jídelna',Nemocnice:'Nemocnice',Divadlo:'Divadlo',Obchod_s_potravinami:'Obchod s potravinami',Knihkupectvi:'Knihkupectví',Firma_a_noviny:'Firma a redakce novin',Policejni_stanice:'Policejní stanice',Vojenska_zakladna:'Vojenská základna',Mauzoleum:'Mauzoleum',Ukryt_zlocincu:'Úkryt zločinců',Stadion:'Stadion',Lazne:'Lázně',Vedecka_laborator:'Vědecká laboratoř',Bistro:'Bistro'};
     // raycaster = „paprsek“ z místa kliknutí do scény, zjistí, na co se kliklo
@@ -1656,7 +1697,7 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
       const r=renderer.domElement.getBoundingClientRect();
       m.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);
       ray.setFromCamera(m,camera);
-      const hits=ray.intersectObjects([groups.budovy,groups.parcely].filter(g=>g.visible),true);
+      const hits=ray.intersectObjects(Object.values(groups).filter(g=>g.visible),true);   // jen zapnuté vrstvy
       if(!hits.length){closeInfo();return;}   // kliknutí do prázdna kartu zavře
       let o=hits[0].object; while(o&&!(o.userData&&('lot' in o.userData))) o=o.parent;
       if(!o) return;
