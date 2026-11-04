@@ -958,7 +958,6 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 .v-tools.closed .v-tools-h span{transform:rotate(-90deg)}
 .v-tools.closed>:not(.v-tools-h){display:none}   /* sbalený panel ukazuje jen nadpis */
 .v-tools.closed .v-tools-h{margin:0}
-.v-tools .sw{width:16px;height:11px;flex:none}                            /* barevný čtvereček vrstvy */
 .v-help{position:absolute;left:12px;bottom:12px;z-index:5;font-size:.8rem;color:var(--fg);background:color-mix(in srgb,var(--surface) 88%,transparent);border-radius:8px;padding:5px 9px}  /* nápověda vlevo dole */
 .v-status{position:absolute;inset:auto 0 0 0;margin:auto;top:0;height:max-content;width:max-content;max-width:86%;z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:.92rem}  /* hláška „Načítám…“ uprostřed */
 /* karta budovy ve 3D (vlevo nahoře) */
@@ -1566,7 +1565,9 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     const scene=new THREE.Scene(); scene.background=new THREE.Color(0xcfdce6); scene.fog=new THREE.Fog(0xcfdce6,1800,5200);
 
     // kamera: HOME = výchozí pohled (poloha kamery a bod, na který se dívá; souřadnice v metrech, střed světa = 0,0)
-    const camera=new THREE.PerspectiveCamera(45,W()/H(),2,12000);
+    // 45 = zorný úhel; 5 a 9000 = nejbližší a nejvzdálenější viditelná vzdálenost v m
+    // (čím menší rozdíl mezi nimi, tím přesněji grafická karta pozná, co je vpředu – méně blikání)
+    const camera=new THREE.PerspectiveCamera(45,W()/H(),5,9000);
     const HOME={pos:new THREE.Vector3(-1150,520,180),tgt:new THREE.Vector3(60,40,40)};
     camera.position.copy(HOME.pos);
 
@@ -1606,10 +1607,13 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     g.setAttribute('uv',new THREE.BufferAttribute(uv,2));
     g.setIndex(new THREE.BufferAttribute(idx,1));
     g.computeVertexNormals();   // stínování svahů
-    const terrain=new THREE.Mesh(g,new THREE.MeshLambertMaterial({map:tex})); scene.add(terrain);
+    // polygonOffset odsune terén v hloubce kousek „dozadu“: povrch pozemků leží přesně na terénu
+    // a bez toho by se při přibližování přetahovaly, kdo je vidět (blikání, tzv. z-fighting)
+    const terrain=new THREE.Mesh(g,new THREE.MeshLambertMaterial({map:tex,polygonOffset:true,polygonOffsetFactor:4,polygonOffsetUnits:8})); scene.add(terrain);
 
     // moře: poloprůhledná modrá plocha ve výšce hladiny 28,07 m
-    const sea=new THREE.Mesh(new THREE.PlaneGeometry(12000,12000),new THREE.MeshLambertMaterial({color:0x3f7fa8,transparent:true,opacity:.72}));
+    // (stejný polygonOffset jako terén, aby se pobřeží nezměnilo)
+    const sea=new THREE.Mesh(new THREE.PlaneGeometry(12000,12000),new THREE.MeshLambertMaterial({color:0x3f7fa8,transparent:true,opacity:.72,polygonOffset:true,polygonOffsetFactor:4,polygonOffsetUnits:8}));
     sea.rotation.x=-Math.PI/2; sea.position.y=28.07; scene.add(sea);
 
     // smyčka vykreslování (asi 60× za sekundu)
@@ -1624,13 +1628,13 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 
     /* ---- vrstvy 3D modelu ----
        Každá vrstva je skupina objektů, kterou jde zapnout/vypnout zaškrtávátkem.
-       barva = čtvereček v ovládacím panelu (stejné barvy jako legenda 2D mapy) */
+       key = vnitřní název vrstvy, label = text v ovládacím panelu */
     const LAYERS=[
-      {key:'prazdne', label:'Prázdné pozemky',   color:'var(--lot-empty)'},
-      {key:'domy',    label:'Rodinné domy',      color:'var(--lot-house)'},
-      {key:'budovy',  label:'Veřejné budovy',    color:'var(--bld-public)'},   // radnice, nemocnice, škola, stadion…
-      {key:'mista',   label:'Veřejná místa',     color:'var(--lot-public)'},   // parky, pláže, jezírka, knihovna, posilovna, maják…
-      {key:'zakladna',label:'Vojenská základna', color:'#7d7a5c'}              // základna + raketová rampa
+      {key:'prazdne', label:'Prázdné pozemky'},
+      {key:'domy',    label:'Rodinné domy'},
+      {key:'budovy',  label:'Veřejné budovy'},   // radnice, nemocnice, škola, stadion, knihovna, galerie, posilovna…
+      {key:'mista',   label:'Veřejná místa'},   // parky, pláže, jezírka, bazény, maják…
+      {key:'zakladna',label:'Vojenská základna'}              // základna + raketová rampa
     ];
     const groups={};
     LAYERS.forEach(ly=>{ groups[ly.key]=new THREE.Group(); scene.add(groups[ly.key]); });
@@ -1663,11 +1667,11 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     status(null);   // vše načteno, hláška zmizí
 
     /* ---- ovládací panel vpravo nahoře ---- */
-    // zaškrtávátko pro každou vrstvu (s barevným čtverečkem) + moře + tlačítko výchozího pohledu
+    // zaškrtávátko pro každou vrstvu + moře + tlačítko výchozího pohledu
     const tools=document.createElement('div'); tools.className='v-tools';
     tools.innerHTML='<button type="button" class="v-tools-h" aria-expanded="true">Vrstvy <span aria-hidden="true">▾</span></button>'+
-      LAYERS.map(ly=>'<label for="v-'+ly.key+'"><input type="checkbox" id="v-'+ly.key+'" checked><span class="sw" style="background:'+ly.color+'"></span>'+ly.label+'</label>').join('')+
-      '<label for="v-s"><input type="checkbox" id="v-s" checked><span class="sw" style="background:#9ccbe6"></span>Moře</label>'+
+      LAYERS.map(ly=>'<label for="v-'+ly.key+'"><input type="checkbox" id="v-'+ly.key+'" checked>'+ly.label+'</label>').join('')+
+      '<label for="v-s"><input type="checkbox" id="v-s" checked>Moře</label>'+
       '<button class="btn ghost" id="v-home" type="button">Výchozí pohled</button>';
     viewer.appendChild(tools);
     // nadpis „Vrstvy“ panel sbalí / rozbalí; na telefonu je panel na začátku sbalený, aby nezakrýval model
