@@ -1,99 +1,118 @@
 <!DOCTYPE html>
+<!--
+================================================================================
+  SUNSET VALLEY – interaktivní mapa města ze hry The Sims 3
+  Autorka: Veronika Plisková, 2026
+================================================================================
+
+  JAK JE WEB POSKLÁDANÝ (soubory ve složce):
+    index.html      – tato stránka: vzhled (CSS), obsah (HTML) a chování (JavaScript)
+    data.js         – data pozemků a budov pro mapu (polygony + atributy, formát GeoJSON)
+    mapa.jpg        – podkladový obrázek mapy (2 048 × 2 048 px = 2 048 × 2 048 m)
+    hlavicka.jpg    – obrázek v pozadí záhlaví
+    logo2.png       – logo The Sims 3 v záhlaví
+    simove.webp     – obrázek simíků v části Informace
+    nahledy/        – náhledy pozemků ze hry (zobrazují se v kartě po kliknutí)
+    simici/         – portréty obyvatel (zobrazují se v kartě domu)
+    3d/             – data pro 3D model (terén, textura terénu, budovy, parcely)
+                      jsou uložená jako .js, aby web šel otevřít i přímo z disku
+
+  POŘADÍ ČÁSTÍ V TOMTO SOUBORU:
+    1. <head>  – nastavení stránky, písma
+    2. <style> – všechny styly (CSS), rozdělené do očíslovaných bloků
+    3. <body>  – obsah stránky (HTML): záhlaví, menu, mapa, informace, 3D, postup, patička
+    4. <script> na konci – JavaScript:
+         a) 2D MAPA (knihovna Leaflet)
+         b) 3D MODEL (knihovna three.js)
+         c) HORNÍ MENU (zvýraznění aktuální části)
+
+  Externí knihovny (stahují se z internetu, proto web potřebuje připojení):
+    Leaflet 1.9.4  – 2D mapa          (cdnjs.cloudflare.com)
+    three.js 0.147 – 3D zobrazení     (cdn.jsdelivr.net), načítá se až po kliknutí
+    Google Fonts   – písma Lilita One, Baloo 2, Nunito Sans, IBM Plex Mono
+================================================================================
+-->
 <html lang="cs">
 <head>
 <meta charset="utf-8">
+<!-- viewport: bez tohoto řádku by se stránka na mobilu zobrazila jako zmenšená verze pro počítač -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- název stránky na kartě prohlížeče -->
 <title>Sunset Valley Atlas</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<!-- písma z Google Fonts: Lilita One (nadpisy ve stylu loga), Baloo 2 (menší nadpisy), Nunito Sans (text), IBM Plex Mono (údaje v záhlaví) -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Lilita+One&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Rozvržení: horní pás s názvem města, pod ním mapa přes celou šířku a vedle ní panel s legendou a seznamem míst (na mobilu pod mapou). */
+/* ==========================================================================
+   STYLY (CSS)
+   Bloky:  1 Barvy a písma · 2 Základ stránky · 3 Leaflet (knihovna) · 4 Záhlaví
+           5 Horní menu · 6 Mapa · 7 Karta pozemku · 8 Nástroje mapy (vrstvy, legenda,
+           celá obrazovka) · 9 Vyhledávání · 10 Měřítko a tiráž · 11 Informace
+           12 3D model · 13 Jak mapa vznikla · 14 Patička · 15 Mobily a tablety
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1) BARVY A PÍSMA – proměnné, které se používají v celé stránce.
+      Když tu změníš barvu, změní se všude (např. --lot-house = barva pozemku s domem
+      na mapě i v legendě).
+   -------------------------------------------------------------------------- */
 :root{
-  --bg:#f1f4ec; --surface:#ffffff; --fg:#1c2a21; --muted:#5d6b61; --line:#d7dfd2;
-  --sea:#1d5878; --meadow:#5f8f33; --accent:#2fa35a; --sand:#e8dcbc;
-  --lot-house:#e8dcbc; --lot-public:#5cc0d8; --lot-empty:#8fd16a; --bld-house:#b0473c; --bld-public:#2d6f9e;
-  --display:"Baloo 2","Trebuchet MS",system-ui,sans-serif;
-  --body:"Nunito Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  /* barvy stránky */
+  --bg:#f1f4ec;        /* pozadí stránky */
+  --surface:#ffffff;   /* pozadí karet a panelů */
+  --fg:#1c2a21;        /* hlavní barva textu */
+  --muted:#5d6b61;     /* méně výrazný (šedivý) text */
+  --line:#d7dfd2;      /* tenké okraje a čáry */
+  --sea:#1d5878;       /* moře / pozadí mapy, než se načte */
+  --meadow:#5f8f33;
+  --accent:#2fa35a;    /* zelená pro tlačítka a zvýraznění */
+  --sand:#e8dcbc;
+  /* barvy vrstev na mapě (a v legendě) */
+  --lot-house:#e8dcbc;   /* pozemek s domem – béžová */
+  --lot-public:#5cc0d8;  /* veřejné místo – modrá */
+  --lot-empty:#8fd16a;   /* prázdný pozemek – zelená */
+  --bld-house:#b0473c;   /* rodinný dům – červená */
+  --bld-public:#2d6f9e;  /* veřejná budova – tmavě modrá */
+  /* písma */
+  --display:"Baloo 2","Trebuchet MS",system-ui,sans-serif;          /* nadpisy karet a panelů */
+  --body:"Nunito Sans",system-ui,-apple-system,"Segoe UI",sans-serif; /* běžný text */
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;            /* řádek s údaji v záhlaví */
 }
+/* tmavý režim: když má návštěvník v systému zapnutý tmavý vzhled, použijí se tyto barvy */
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#111a15; --surface:#18241d; --fg:#e4ede5; --muted:#9db0a3; --line:#2b3a31;
   --sea:#7ec3e6; --meadow:#9fd06e; --accent:#55c97d; --sand:#4a432f; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#111a15; --surface:#18241d; --fg:#e4ede5; --muted:#9db0a3; --line:#2b3a31;
   --sea:#7ec3e6; --meadow:#9fd06e; --accent:#55c97d; --sand:#4a432f; color-scheme:dark}
+
+/* --------------------------------------------------------------------------
+   2) ZÁKLAD STRÁNKY
+   -------------------------------------------------------------------------- */
 body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5}
+/* pruh nahoře na telefonech s výřezem (iPhone), aby obsah nebyl pod hodinami */
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:1000;background:var(--bg)}
+/* .wrap = obsah na střed stránky, max. šířka 1 500 px, okraje 16 px po stranách */
 .wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));max-width:1500px;margin:0 auto}
-header{padding-block:44px 30px}
-.hero{position:relative;isolation:isolate;overflow:hidden}
-.hero::before{content:"";position:absolute;inset:0;z-index:-2;background:url("hlavicka.jpg") center 52%/cover no-repeat;opacity:.5;-webkit-mask-image:linear-gradient(to bottom,#000 55%,transparent);mask-image:linear-gradient(to bottom,#000 55%,transparent)}
-.hero::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,color-mix(in srgb,var(--bg) 82%,transparent) 0%,color-mix(in srgb,var(--bg) 55%,transparent) 55%,color-mix(in srgb,var(--bg) 20%,transparent) 100%)}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .hero::before{opacity:.35}}
-:root[data-theme="dark"] .hero::before{opacity:.35}
-.brand{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
-.mark{height:clamp(84px,11vw,118px);width:auto;flex:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.18))}
-h1{font-family:"Lilita One",var(--display);font-weight:400;font-size:clamp(2.6rem,6vw,4.3rem);line-height:1;margin:0;letter-spacing:.01em;color:#ffffff;-webkit-text-stroke:.09em #1b4f9e;paint-order:stroke fill;text-shadow:0 .06em 0 #123a78,0 .12em .25em rgba(0,0,0,.25);text-wrap:balance}
-h1 span{color:#8fd33a}
-.sub{margin:6px 0 0;color:var(--muted);font-size:1.02rem;max-width:62ch}
-.meta{font-family:var(--mono);font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:12px}
-main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
-.simove{margin:0;display:flex;justify-content:center;align-items:flex-start;min-width:0}
-.simove img{width:min(100%,440px);height:auto;opacity:.52;filter:saturate(.82);-webkit-mask-image:linear-gradient(to bottom,#000 70%,transparent);mask-image:linear-gradient(to bottom,#000 70%,transparent)}
-@media (max-width:900px){.simove img{width:min(100%,320px)}}
-#map{height:clamp(460px,80vh,920px);border-radius:14px;border:1px solid var(--line);background:var(--sea);overflow:hidden}
-aside{display:flex;flex-direction:column;gap:16px;min-width:0}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
-.panel h2{font-family:var(--display);font-weight:600;font-size:1.15rem;margin:0 0 10px}
-.toggles{display:flex;flex-direction:column;gap:8px}
-.toggles label{display:flex;align-items:center;gap:10px;cursor:pointer}
-.toggles input{accent-color:var(--accent);width:17px;height:17px}
-.legend{display:grid;grid-template-columns:22px 1fr;gap:7px 10px;align-items:center;font-size:.92rem}
-.sw{width:22px;height:14px;border-radius:4px;border:1px solid rgba(0,0,0,.25)}
-.places{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:330px;overflow:auto}
-.places button{all:unset;display:flex;justify-content:space-between;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:.93rem}
-.places button:hover,.places button:focus-visible{background:color-mix(in srgb,var(--accent) 16%,transparent)}
-.places button:focus-visible{outline:2px solid var(--accent)}
-.places small{color:var(--muted);font-family:var(--mono);font-size:.72rem;white-space:nowrap}
-.hint{color:var(--muted);font-size:.85rem;margin:0}
-.mapwrap{position:relative;min-width:0;border-radius:14px;overflow:hidden}
-.mapwrap.fs{position:fixed;inset:0;z-index:5000;border-radius:0;background:var(--sea)}
-.mapwrap.fs #map{height:100vh;height:100dvh;border:0;border-radius:0}
+/* plynulé posouvání po kliknutí na položku menu */
+html{scroll-behavior:smooth}
+/* aby nadpis části po skoku z menu nebyl schovaný pod přichyceným menu */
+#mapa,#informace,#model,#postup{scroll-margin-top:64px}
+/* společný styl velkých nadpisů částí (Informace, Jak mapa vznikla) – bílé písmo s modrým obrysem jako logo */
+.sec-h{font-family:"Lilita One",var(--display);font-weight:400;font-size:clamp(1.7rem,3.4vw,2.4rem);margin:0 0 8px;color:#ffffff;-webkit-text-stroke:.08em #1b4f9e;paint-order:stroke fill;letter-spacing:.01em}
+/* zelené tlačítko (např. „Spustit 3D model“) a jeho světlá varianta .ghost */
+.btn{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;background:var(--accent);color:#fff;cursor:pointer}
+.btn:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.btn.ghost{background:var(--surface);color:var(--fg);border:1px solid var(--line);font-weight:600;padding:7px 12px}
+/* když nechce mít návštěvník animace (nastavení systému), vypnou se */
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}html{scroll-behavior:auto}}
+/* zámek posouvání stránky, když je mapa nebo 3D přes celou obrazovku */
 .fs-lock,.fs-lock body{overflow:hidden}
-#b-fs .i-close,.v-fs .i-close{display:none}
-.v-fs[aria-pressed="true"] .i-open{display:none}
-.v-fs[aria-pressed="true"] .i-close{display:block}
-.v-fs{position:absolute;right:12px;bottom:12px;z-index:8;width:34px;height:34px;border-radius:8px;border:2px solid rgba(0,0,0,.2);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;padding:0;background-clip:padding-box}
-.v-fs:hover{background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
-.v-fs:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.viewer.fs{position:fixed;inset:0;z-index:5000;height:100vh;height:100dvh;border:0;border-radius:0}
-#b-fs[aria-pressed="true"] .i-open{display:none}
-#b-fs[aria-pressed="true"] .i-close{display:block}
-.m-info{position:absolute;top:12px;right:56px;z-index:1002;width:min(280px,calc(100% - 80px));max-height:calc(100% - 24px);overflow:auto;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 26px rgba(0,0,0,.22)}
-.m-info .x{position:sticky;top:0;float:right;margin:6px 8px -40px 0;z-index:2;width:30px;height:30px;border-radius:99px;border:0;background:rgba(0,0,0,.45);color:#fff;font:inherit;font-size:1.2rem;line-height:1;cursor:pointer}
-.m-info .x:focus-visible{outline:2px solid var(--accent)}
-.m-info .pop>img{aspect-ratio:16/10}
-@media (max-width:600px){.m-info{top:auto;bottom:10px;left:10px;right:10px;width:auto;max-height:55%}}
-.drawer-btn{position:absolute;top:12px;left:12px;z-index:1001;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:left .25s ease}
-.drawer-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.drawer-btn svg{transition:transform .25s ease}
-.mapwrap.open .drawer-btn{left:min(300px,calc(85% + 10px))}
-.mapwrap.open .drawer-btn svg{transform:rotate(180deg)}
-.drawer{position:absolute;top:0;bottom:0;left:0;z-index:1000;width:min(290px,85%);background:var(--surface);border-right:1px solid var(--line);box-shadow:4px 0 18px rgba(0,0,0,.18);transform:translateX(-105%);transition:transform .25s ease;display:flex;flex-direction:column;padding:16px 14px;gap:12px;box-sizing:border-box}
-.mapwrap.open .drawer{transform:none}
-.drawer h2{font-family:var(--display);font-weight:600;font-size:1.15rem;margin:0}
-.drawer input{width:100%;box-sizing:border-box;font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
-.drawer input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.results{list-style:none;margin:0;padding:0;overflow:auto;flex:1;display:flex;flex-direction:column;gap:2px;min-height:0}
-.results button{all:unset;display:block;width:100%;box-sizing:border-box;padding:7px 9px;border-radius:8px;cursor:pointer}
-.results button:hover,.results button:focus-visible{background:color-mix(in srgb,var(--accent) 16%,transparent)}
-.results button:focus-visible{outline:2px solid var(--accent)}
-.results b{display:block;font-weight:600;font-size:.93rem}
-.results span{color:var(--muted);font-size:.8rem}
-.count{color:var(--muted);font-size:.8rem;margin:0}
-/* leaflet */
 
-
+/* --------------------------------------------------------------------------
+   3) LEAFLET – základní styly knihovny pro 2D mapu (převzato z leaflet.css 1.9.4).
+      Tuto část NEUPRAVUJ. Vlastní úpravy vzhledu mapy jsou až v blocích 6–10.
+   -------------------------------------------------------------------------- */
 .leaflet-pane,
 .leaflet-tile,
 .leaflet-marker-icon,
@@ -753,128 +772,251 @@ svg.leaflet-image-layer.leaflet-interactive path {
 		print-color-adjust: exact;
 		}
 	}
+/* ---- konec stylů knihovny Leaflet ---- */
 
+/* --------------------------------------------------------------------------
+   4) ZÁHLAVÍ – logo, nadpis „Sunset Valley“, podnadpis, řádek s údaji
+   -------------------------------------------------------------------------- */
+header{padding-block:44px 30px}
+.hero{position:relative;isolation:isolate;overflow:hidden}
+/* obrázek města v pozadí: „center 52%“ = svislá poloha výřezu (menší číslo = výš), opacity = průhlednost,
+   maska nechá obrázek dole plynule zmizet */
+.hero::before{content:"";position:absolute;inset:0;z-index:-2;background:url("hlavicka.jpg") center 52%/cover no-repeat;opacity:.5;-webkit-mask-image:linear-gradient(to bottom,#000 55%,transparent);mask-image:linear-gradient(to bottom,#000 55%,transparent)}
+/* světlý závoj přes obrázek zleva doprava, aby byl nadpis čitelný */
+.hero::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,color-mix(in srgb,var(--bg) 82%,transparent) 0%,color-mix(in srgb,var(--bg) 55%,transparent) 55%,color-mix(in srgb,var(--bg) 20%,transparent) 100%)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .hero::before{opacity:.35}}
+:root[data-theme="dark"] .hero::before{opacity:.35}
+.brand{display:flex;align-items:center;gap:18px;flex-wrap:wrap}   /* logo + nadpis vedle sebe */
+.mark{height:clamp(84px,11vw,118px);width:auto;flex:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.18))}  /* logo */
+/* hlavní nadpis ve stylu loga Sims: bílé písmo, modrý obrys, stín */
+h1{font-family:"Lilita One",var(--display);font-weight:400;font-size:clamp(2.6rem,6vw,4.3rem);line-height:1;margin:0;letter-spacing:.01em;color:#ffffff;-webkit-text-stroke:.09em #1b4f9e;paint-order:stroke fill;text-shadow:0 .06em 0 #123a78,0 .12em .25em rgba(0,0,0,.25);text-wrap:balance}
+h1 span{color:#8fd33a}   /* slovo „Valley“ zeleně */
+.sub{margin:6px 0 0;color:var(--muted);font-size:1.02rem;max-width:62ch}   /* podnadpis */
+.meta{font-family:var(--mono);font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:12px}  /* řádek „Svět 2 048 × 2 048 m …“ */
+
+/* --------------------------------------------------------------------------
+   5) HORNÍ MENU – přichycené nahoře při posouvání stránky
+   -------------------------------------------------------------------------- */
+.topnav{position:sticky;top:0;z-index:1100;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin-bottom:14px}
+.topnav ul{list-style:none;margin:0;padding:8px 0;display:flex;gap:6px;flex-wrap:wrap}
+.topnav a{display:block;padding:7px 14px;border-radius:99px;color:var(--fg);text-decoration:none;font-weight:700;font-size:.95rem}
+.topnav a:hover{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.topnav a.on{background:var(--accent);color:#fff}   /* položka části, ve které právě jsi (třídu „on“ nastavuje JavaScript, blok c) */
+.topnav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* .l-long / .l-short = dlouhý a zkrácený název položky (zkrácený se ukáže jen na mobilu, viz blok 15) */
+.l-short{display:none}
+
+/* --------------------------------------------------------------------------
+   6) MAPA – rámeček mapy, velikost, režim přes celou obrazovku
+   -------------------------------------------------------------------------- */
+main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
+.map-howto{margin:0 4px -4px;color:var(--muted);font-size:.95rem}           /* věta „Klikni na pozemek…“ nad mapou */
+.map-note{color:var(--muted);font-size:.85rem;margin:2px 4px 0;text-align:center}  /* poznámka o původu dat pod mapou */
+.mapwrap{position:relative;min-width:0;border-radius:14px;overflow:hidden}    /* obal mapy, do kterého se vkládá i vyhledávání a karta */
+#map{height:clamp(460px,80vh,920px);border-radius:14px;border:1px solid var(--line);background:var(--sea);overflow:hidden}  /* výška mapy: 80 % výšky okna, min. 460 px, max. 920 px */
+/* mapa přes celou obrazovku (třídu „fs“ přidává tlačítko se čtyřmi rohy) */
+.mapwrap.fs{position:fixed;inset:0;z-index:5000;border-radius:0;background:var(--sea)}
+.mapwrap.fs #map{height:100vh;height:100dvh;border:0;border-radius:0}
+/* vlastní úpravy vzhledu Leafletu */
 .leaflet-container{font-family:var(--body);background:var(--sea)}
-.leaflet-popup-content-wrapper{border-radius:14px;background:var(--surface);color:var(--fg);padding:0;overflow:hidden}
-.leaflet-popup-tip{background:var(--surface)}
-.leaflet-popup-content{margin:0;width:270px!important}
-.leaflet-container a.leaflet-popup-close-button{color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6);top:6px;right:6px}
-.leaflet-bar a{background:var(--surface);color:var(--fg);border-color:var(--line)}
-.pop>img{display:block;width:100%;aspect-ratio:1/1;object-fit:contain;background:linear-gradient(180deg,#ffffff 0%,#eaf3f8 100%)}
+.leaflet-bar a{background:var(--surface);color:var(--fg);border-color:var(--line)}   /* tlačítka + a − */
+
+/* --------------------------------------------------------------------------
+   7) KARTA POZEMKU / BUDOVY – okno, které se ukáže po kliknutí na mapu (i ve 3D)
+   -------------------------------------------------------------------------- */
+/* pevná karta vpravo nahoře v mapě */
+.m-info{position:absolute;top:12px;right:56px;z-index:1002;width:min(280px,calc(100% - 80px));max-height:calc(100% - 24px);overflow:auto;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 26px rgba(0,0,0,.22)}
+.m-info .x{position:sticky;top:0;float:right;margin:6px 8px -40px 0;z-index:2;width:30px;height:30px;border-radius:99px;border:0;background:rgba(0,0,0,.45);color:#fff;font:inherit;font-size:1.2rem;line-height:1;cursor:pointer}  /* křížek zavřít */
+.m-info .x:focus-visible{outline:2px solid var(--accent)}
+.m-info .pop>img{aspect-ratio:16/10}
+@media (max-width:600px){.m-info{top:auto;bottom:10px;left:10px;right:10px;width:auto;max-height:55%}}  /* na úzkém displeji karta dole přes celou šířku */
+/* obsah karty (.pop) – stejný pro 2D mapu i 3D model */
+.pop>img{display:block;width:100%;aspect-ratio:1/1;object-fit:contain;background:linear-gradient(180deg,#ffffff 0%,#eaf3f8 100%)}  /* náhled pozemku na bílo-modrém pozadí */
 .pop .b{padding:12px 14px 14px}
-.pop h3{font-family:var(--display);font-weight:600;font-size:1.25rem;line-height:1.1;margin:0 0 6px}
+.pop h3{font-family:var(--display);font-weight:600;font-size:1.25rem;line-height:1.1;margin:0 0 6px}   /* název pozemku */
+/* štítek s typem (zelený = dům, modrý = veřejné, béžový = prázdný) */
 .chip{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:99px;background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--fg)}
 .chip.pub{background:color-mix(in srgb,var(--bld-public) 25%,transparent)}
 .chip.emp{background:color-mix(in srgb,#c9a95e 35%,transparent)}
+/* tabulka údajů (Domácnost, Plocha, Nadmořská výška…) */
 .pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:10px 0 0;font-size:.88rem}
 .pop dt{color:var(--muted)}
 .pop dd{margin:0;font-variant-numeric:tabular-nums;text-align:right}
 .pop p{margin:10px 0 0;font-size:.88rem}
+/* obyvatelé domu: portréty ve třech sloupcích, kulaté s modrým pozadím */
 .sims-h{margin:12px 0 6px;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .sims{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 6px}
 .sims li{display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;font-size:.74rem;line-height:1.2;min-width:0}
 .sims img,.sims .noimg{width:100%;max-width:72px;aspect-ratio:1/1;border-radius:50%;object-fit:cover;background:radial-gradient(circle at 50% 30%,#f1f9ff 0%,#c4e3f5 55%,#93c6e4 100%);border:2px solid var(--line)}
 .sims .noimg{display:block}
 
-.s3d{padding-block:22px 40px}
-.s3d-head{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:12px}
-.s3d h2{font-family:"Lilita One",var(--display);font-weight:400;font-size:clamp(1.7rem,3.4vw,2.4rem);margin:0;color:#ffffff;-webkit-text-stroke:.08em #1b4f9e;paint-order:stroke fill;letter-spacing:.01em}
-.s3d-head p{margin:0;color:var(--muted);max-width:none}
-.viewer{position:relative;height:clamp(420px,74vh,860px);border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#cfdbe4}
-.viewer canvas{display:block;width:100%;height:100%;touch-action:none}
-.poster{position:absolute;inset:0;display:grid;place-items:center;background:center/cover no-repeat url("3d/nahled3d.jpg")}
-.poster::before{content:"";position:absolute;inset:0;background:color-mix(in srgb,var(--bg) 35%,transparent)}
-.poster-card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;align-items:flex-start;max-width:min(360px,86%);box-shadow:0 6px 24px rgba(0,0,0,.18)}
-.poster-card p{margin:0;color:var(--muted);font-size:.92rem}
-.btn{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;background:var(--accent);color:#fff;cursor:pointer}
-.btn:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
-.btn.ghost{background:var(--surface);color:var(--fg);border:1px solid var(--line);font-weight:600;padding:7px 12px}
-.v-tools{position:absolute;top:12px;right:12px;z-index:5;display:flex;flex-direction:column;gap:8px;align-items:stretch;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-.v-tools label{display:flex;gap:8px;align-items:center;font-size:.9rem;cursor:pointer}
-.v-tools input{accent-color:var(--accent)}
-.v-help{position:absolute;left:12px;bottom:12px;z-index:5;font-size:.8rem;color:var(--fg);background:color-mix(in srgb,var(--surface) 88%,transparent);border-radius:8px;padding:5px 9px}
-.v-status{position:absolute;inset:auto 0 0 0;margin:auto;top:0;height:max-content;width:max-content;max-width:86%;z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:.92rem}
-.v-info{position:absolute;left:12px;top:12px;z-index:6;width:min(270px,70%);background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.2)}
-.v-info .x{position:absolute;top:6px;right:8px;z-index:2;font:inherit;font-size:1.2rem;line-height:1;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7);cursor:pointer}
-.v-info .pop>img{aspect-ratio:16/10}
-@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-/* horní menu a nové části */
-html{scroll-behavior:smooth}
-#mapa,#informace,#model,#postup{scroll-margin-top:64px}
-.topnav{position:sticky;top:0;z-index:1100;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin-bottom:14px}
-.topnav ul{list-style:none;margin:0;padding:8px 0;display:flex;gap:6px;flex-wrap:wrap}
-.topnav a{display:block;padding:7px 14px;border-radius:99px;color:var(--fg);text-decoration:none;font-weight:700;font-size:.95rem}
-.topnav a:hover{background:color-mix(in srgb,var(--accent) 16%,transparent)}
-.topnav a.on{background:var(--accent);color:#fff}
-.topnav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.sec-h{font-family:"Lilita One",var(--display);font-weight:400;font-size:clamp(1.7rem,3.4vw,2.4rem);margin:0 0 8px;color:#ffffff;-webkit-text-stroke:.08em #1b4f9e;paint-order:stroke fill;letter-spacing:.01em}
-.info{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:center;padding-block:26px 6px}
-.info-text>p{margin:0 0 16px;max-width:62ch}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0}
-.stats div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-.stats dt{color:var(--muted);font-size:.78rem;line-height:1.25}
-.stats dd{margin:2px 0 0;font-family:var(--display);font-weight:700;font-size:1.45rem;line-height:1.1;font-variant-numeric:tabular-nums}
-@media (max-width:900px){.info{grid-template-columns:minmax(0,1fr)}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.postup{padding-block:0 56px}
-.steps{list-style:none;margin:6px 0 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;counter-reset:k}
-.steps li{counter-increment:k;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
-.steps li::before{content:counter(k);display:grid;place-items:center;width:30px;height:30px;border-radius:99px;background:var(--accent);color:#fff;font-weight:800;margin-bottom:4px}
-.steps b{font-family:var(--display);font-size:1.1rem}
-.steps span{color:var(--muted);font-size:.92rem}
-@media (max-width:900px){.steps{grid-template-columns:minmax(0,1fr)}}
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
-.leaflet-control-scale{margin:0 0 10px 10px!important}
-.leaflet-bottom.leaflet-right .m-imprint{margin:0 10px 10px 0;text-align:right;font-size:.68rem;line-height:1.35;color:#333;background:rgba(255,255,255,.55);padding:1px 6px;border-radius:4px;max-width:calc(100vw - 80px)}
-.foot{border-top:1px solid var(--line);padding-block:18px 28px;color:var(--muted);font-size:.82rem}
-.foot p{margin:0 0 4px;max-width:110ch}
-.foot b{color:var(--fg)}
-.leaflet-control-scale-line{background:rgba(255,255,255,.5);color:#333;border:1.5px solid rgba(40,40,40,.75);border-top:0;font-family:var(--body);font-size:.68rem;font-weight:500;padding:0 4px;line-height:1.35;text-shadow:0 0 2px rgba(255,255,255,.9);box-sizing:content-box}
-/* nástroje pod zoomem: vrstvy a legenda */
+/* --------------------------------------------------------------------------
+   8) NÁSTROJE MAPY – tlačítka pod zoomem (vrstvy, legenda, celá obrazovka)
+      a okénka, která se z nich otevírají
+   -------------------------------------------------------------------------- */
 .m-tools{display:flex;flex-direction:column;gap:8px;align-items:flex-end;clear:both}
 .m-tool{position:relative}
 .m-tool>button{width:34px;height:34px;border-radius:8px;border:2px solid rgba(0,0,0,.2);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;padding:0;background-clip:padding-box}
 .m-tool>button:hover{background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
-.m-tool>button[aria-expanded="true"]{background:var(--accent);color:#fff}
+.m-tool>button[aria-expanded="true"]{background:var(--accent);color:#fff}   /* otevřené tlačítko je zelené */
 .m-tool>button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* okénko vlevo od tlačítka (Vrstvy / Legenda) */
 .m-pop{position:absolute;top:0;right:calc(100% + 8px);width:220px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.2);font-size:.92rem;cursor:auto}
 .m-pop[hidden]{display:none}
 .m-pop h2{font-family:var(--display);font-weight:600;font-size:1.05rem;margin:0 0 8px}
+/* zaškrtávátka vrstev */
+.toggles{display:flex;flex-direction:column;gap:8px}
+.toggles label{display:flex;align-items:center;gap:10px;cursor:pointer}
+.toggles input{accent-color:var(--accent);width:17px;height:17px}
+/* legenda: barevný čtvereček + popisek; .leg-sep = šedá čára mezi pozemky a budovami */
+.legend{display:grid;grid-template-columns:22px 1fr;gap:7px 10px;align-items:center;font-size:.92rem}
 .m-pop .legend{font-size:.88rem}
+.sw{width:22px;height:14px;border-radius:4px;border:1px solid rgba(0,0,0,.25)}
 .leg-sep{grid-column:1 / -1;border:0;border-top:1px solid #c4c4c4;margin:3px 0;width:100%}
-.drawer .only{display:flex;align-items:center;gap:8px;font-size:.88rem;cursor:pointer}
+/* ikona tlačítka celé obrazovky: rohy ven (zvětšit) / rohy dovnitř (zmenšit) – platí pro mapu (#b-fs) i 3D (.v-fs) */
+#b-fs .i-close,.v-fs .i-close{display:none}
+#b-fs[aria-pressed="true"] .i-open,.v-fs[aria-pressed="true"] .i-open{display:none}
+#b-fs[aria-pressed="true"] .i-close,.v-fs[aria-pressed="true"] .i-close{display:block}
+
+/* --------------------------------------------------------------------------
+   9) VYHLEDÁVÁNÍ – vysouvací panel vlevo v mapě (otevírá se šipkou)
+   -------------------------------------------------------------------------- */
+/* tlačítko se šipkou; když je panel otevřený, posune se k jeho okraji a šipka se otočí */
+.drawer-btn{position:absolute;top:12px;left:12px;z-index:1001;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:left .25s ease}
+.drawer-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.drawer-btn svg{transition:transform .25s ease}
+.mapwrap.open .drawer-btn{left:min(300px,calc(85% + 10px))}
+.mapwrap.open .drawer-btn svg{transform:rotate(180deg)}
+/* samotný panel: schovaný vlevo mimo mapu, třída „open“ ho vysune */
+.drawer{position:absolute;top:0;bottom:0;left:0;z-index:1000;width:min(290px,85%);background:var(--surface);border-right:1px solid var(--line);box-shadow:4px 0 18px rgba(0,0,0,.18);transform:translateX(-105%);transition:transform .25s ease;display:flex;flex-direction:column;padding:16px 14px;gap:12px;box-sizing:border-box}
+.mapwrap.open .drawer{transform:none}
+.drawer h2{font-family:var(--display);font-weight:600;font-size:1.15rem;margin:0}
+.drawer input{width:100%;box-sizing:border-box;font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.drawer input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.drawer .only{display:flex;align-items:center;gap:8px;font-size:.88rem;cursor:pointer}   /* „Jen veřejná místa a budovy“ */
 .drawer .only input{accent-color:var(--accent);width:16px;height:16px}
-.map-howto{margin:0 4px -4px;color:var(--muted);font-size:.95rem}
-.map-note{color:var(--muted);font-size:.85rem;margin:2px 4px 0;text-align:center}
-/* === responzivita: telefony a tablety === */
-.imp-short,.l-short{display:none}
+.count{color:var(--muted);font-size:.8rem;margin:0}   /* „Nalezeno: 12“ */
+/* seznam výsledků */
+.results{list-style:none;margin:0;padding:0;overflow:auto;flex:1;display:flex;flex-direction:column;gap:2px;min-height:0}
+.results button{all:unset;display:block;width:100%;box-sizing:border-box;padding:7px 9px;border-radius:8px;cursor:pointer}
+.results button:hover,.results button:focus-visible{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.results button:focus-visible{outline:2px solid var(--accent)}
+.results b{display:block;font-weight:600;font-size:.93rem}
+.results span{color:var(--muted);font-size:.8rem}
+
+/* --------------------------------------------------------------------------
+   10) MĚŘÍTKO (vlevo dole) A TIRÁŽ (vpravo dole) v mapě
+   -------------------------------------------------------------------------- */
+.leaflet-control-scale{margin:0 0 10px 10px!important}
+.leaflet-control-scale-line{background:rgba(255,255,255,.5);color:#333;border:1.5px solid rgba(40,40,40,.75);border-top:0;font-family:var(--body);font-size:.68rem;font-weight:500;padding:0 4px;line-height:1.35;text-shadow:0 0 2px rgba(255,255,255,.9);box-sizing:content-box}
+.leaflet-bottom.leaflet-right .m-imprint{margin:0 10px 10px 0;text-align:right;font-size:.68rem;line-height:1.35;color:#333;background:rgba(255,255,255,.55);padding:1px 6px;border-radius:4px;max-width:calc(100vw - 80px)}
+/* tiráž má dlouhou a krátkou verzi textu; krátká se ukáže na mobilu (blok 15) */
+.imp-short{display:none}
+/* když se tiráž s měřítkem nevejdou vedle sebe, JavaScript přidá třídu „imp-up“ a tiráž se posune výš */
 .imp-up .leaflet-bottom.leaflet-right .m-imprint{margin-bottom:30px!important}
+
+/* --------------------------------------------------------------------------
+   11) INFORMACE – text o městě, políčka s čísly a obrázek simíků
+   -------------------------------------------------------------------------- */
+.info{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:center;padding-block:26px 6px}  /* text vlevo, obrázek vpravo */
+.info-text>p{margin:0 0 16px;max-width:62ch}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0}   /* 4 políčka v řadě */
+.stats div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stats dt{color:var(--muted);font-size:.78rem;line-height:1.25}   /* popisek, např. „Pozemků“ */
+.stats dd{margin:2px 0 0;font-family:var(--display);font-weight:700;font-size:1.45rem;line-height:1.1;font-variant-numeric:tabular-nums}  /* číslo */
+/* obrázek simíků: poloprůhledný (opacity) a dole se ztrácí do pozadí */
+.simove{margin:0;display:flex;justify-content:center;align-items:flex-start;min-width:0}
+.simove img{width:min(100%,440px);height:auto;opacity:.52;filter:saturate(.82);-webkit-mask-image:linear-gradient(to bottom,#000 70%,transparent);mask-image:linear-gradient(to bottom,#000 70%,transparent)}
+
+/* --------------------------------------------------------------------------
+   12) 3D MODEL – prohlížeč, úvodní obrázek s tlačítkem, ovládání, karta budovy
+   -------------------------------------------------------------------------- */
+.s3d{padding-block:22px 40px}
+.s3d-head{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:12px}
+.s3d h2{font-family:"Lilita One",var(--display);font-weight:400;font-size:clamp(1.7rem,3.4vw,2.4rem);margin:0;color:#ffffff;-webkit-text-stroke:.08em #1b4f9e;paint-order:stroke fill;letter-spacing:.01em}
+.s3d-head p{margin:0;color:var(--muted);max-width:none}
+/* okno 3D prohlížeče */
+.viewer{position:relative;height:clamp(420px,74vh,860px);border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#cfdbe4}
+.viewer canvas{display:block;width:100%;height:100%;touch-action:none}
+.viewer.fs{position:fixed;inset:0;z-index:5000;height:100vh;height:100dvh;border:0;border-radius:0}   /* 3D přes celou obrazovku */
+/* úvodní obrázek (nahled3d.jpg) s kartičkou „Spustit 3D model“ – zmizí po kliknutí */
+.poster{position:absolute;inset:0;display:grid;place-items:center;background:center/cover no-repeat url("3d/nahled3d.jpg")}
+.poster::before{content:"";position:absolute;inset:0;background:color-mix(in srgb,var(--bg) 35%,transparent)}
+.poster-card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;align-items:flex-start;max-width:min(360px,86%);box-shadow:0 6px 24px rgba(0,0,0,.18)}
+.poster-card p{margin:0;color:var(--muted);font-size:.92rem}
+/* tlačítko celé obrazovky vpravo dole */
+.v-fs{position:absolute;right:12px;bottom:12px;z-index:8;width:34px;height:34px;border-radius:8px;border:2px solid rgba(0,0,0,.2);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;padding:0;background-clip:padding-box}
+.v-fs:hover{background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.v-fs:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* panel vpravo nahoře: Budovy / Parcely / Moře / Výchozí pohled */
+.v-tools{position:absolute;top:12px;right:12px;z-index:5;display:flex;flex-direction:column;gap:8px;align-items:stretch;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.v-tools label{display:flex;gap:8px;align-items:center;font-size:.9rem;cursor:pointer}
+.v-tools input{accent-color:var(--accent)}
+.v-help{position:absolute;left:12px;bottom:12px;z-index:5;font-size:.8rem;color:var(--fg);background:color-mix(in srgb,var(--surface) 88%,transparent);border-radius:8px;padding:5px 9px}  /* nápověda vlevo dole */
+.v-status{position:absolute;inset:auto 0 0 0;margin:auto;top:0;height:max-content;width:max-content;max-width:86%;z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:.92rem}  /* hláška „Načítám…“ uprostřed */
+/* karta budovy ve 3D (vlevo nahoře) */
+.v-info{position:absolute;left:12px;top:12px;z-index:6;width:min(270px,70%);background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+.v-info .x{position:absolute;top:6px;right:8px;z-index:2;font:inherit;font-size:1.2rem;line-height:1;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7);cursor:pointer}
+.v-info .pop>img{aspect-ratio:16/10}
+
+/* --------------------------------------------------------------------------
+   13) JAK MAPA VZNIKLA – čtyři kartičky s očíslovanými kroky
+   -------------------------------------------------------------------------- */
+.postup{padding-block:0 56px}
+.steps{list-style:none;margin:6px 0 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;counter-reset:k}
+.steps li{counter-increment:k;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.steps li::before{content:counter(k);display:grid;place-items:center;width:30px;height:30px;border-radius:99px;background:var(--accent);color:#fff;font-weight:800;margin-bottom:4px}  /* zelené kolečko s číslem kroku */
+.steps b{font-family:var(--display);font-size:1.1rem}
+.steps span{color:var(--muted);font-size:.92rem}
+
+/* --------------------------------------------------------------------------
+   14) PATIČKA – autorka, zdroj dat a právní upozornění k The Sims / EA
+   -------------------------------------------------------------------------- */
+.foot{border-top:1px solid var(--line);padding-block:18px 28px;color:var(--muted);font-size:.82rem}
+.foot p{margin:0 0 4px;max-width:110ch}
+.foot b{color:var(--fg)}
+
+/* --------------------------------------------------------------------------
+   15) MOBILY A TABLETY (responzivita)
+       @media (max-width:900px) = platí jen na obrazovkách užších než 900 px atd.
+   -------------------------------------------------------------------------- */
+/* tablety a menší: Informace a kroky pod sebou */
 @media (max-width:900px){
-  .info{gap:8px}
+  .info{grid-template-columns:minmax(0,1fr);gap:8px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .steps{grid-template-columns:minmax(0,1fr)}
   .simove img{width:min(80%,320px)}
 }
+/* telefony */
 @media (max-width:700px){
+  /* záhlaví menší, logo vedle nadpisu */
   header{padding-block:22px 16px}
   .brand{gap:12px;flex-wrap:nowrap}
   .mark{height:64px}
   h1{font-size:clamp(2rem,10vw,2.6rem)}
   .sub{font-size:.95rem}
   .meta{font-size:.68rem;margin-top:8px}
+  /* menu: 4 stejně široké položky na jednom řádku, zkrácené názvy */
   .topnav{margin-bottom:10px}
   .topnav ul{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:6px 0}
   .topnav a{white-space:nowrap;padding:6px 4px;font-size:.86rem;text-align:center}
   .l-long{display:none}.l-short{display:inline}
-  .m-info .pop>img{aspect-ratio:auto;height:110px}
   #mapa,#informace,#model,#postup{scroll-margin-top:52px}
+  /* mapa nižší, karta s menším obrázkem */
   #map{height:clamp(380px,68vh,640px)}
+  .m-info .pop>img{aspect-ratio:auto;height:110px}
   .map-howto{font-size:.88rem}
   .map-note{font-size:.78rem;text-align:left}
+  /* krátká tiráž, menší měřítko */
   .imp-long{display:none}.imp-short{display:inline}
   .leaflet-bottom.leaflet-right .m-imprint{margin:0 8px 8px 0;font-size:.62rem}
   .leaflet-control-scale{margin:0 0 8px 8px!important}
   .leaflet-control-scale-line{font-size:.62rem}
   .m-pop{width:min(210px,calc(100vw - 110px))}
+  /* Informace */
   .stats{gap:8px}
   .stats dd{font-size:1.25rem}
+  /* 3D: nižší okno, menší ovládání, karta budovy dole */
   .s3d{padding-block:18px 28px}
   .viewer{height:clamp(360px,70vh,600px)}
   .v-tools{top:8px;right:8px;padding:8px 10px;gap:6px}
@@ -887,6 +1029,7 @@ html{scroll-behavior:smooth}
   .postup{padding-block:0 36px}
   .foot{font-size:.76rem}
 }
+/* velmi malé telefony */
 @media (max-width:380px){
   .mark{height:52px}
   .stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -896,6 +1039,10 @@ html{scroll-behavior:smooth}
 </head>
 <body>
 
+<!-- ======================================================================
+     ZÁHLAVÍ – logo, nadpis, podnadpis a řádek s údaji
+     (obrázek v pozadí se nastavuje v CSS, blok 4: .hero::before)
+     ====================================================================== -->
 <header class="hero"><div class="wrap">
   <div class="brand">
     <img class="mark" src="logo2.png" alt="The Sims 3">
@@ -906,6 +1053,10 @@ html{scroll-behavior:smooth}
   </div>
   <div class="meta">Svět 2 048 × 2 048 m · 92 pozemků · 16 veřejných budov</div>
 </div></header>
+
+<!-- ======================================================================
+     HORNÍ MENU – odkazy na části stránky (href="#…" odpovídá id části níže)
+     ====================================================================== -->
 <nav class="topnav" aria-label="Části stránky"><div class="wrap"><ul>
   <li><a href="#mapa">Mapa</a></li>
   <li><a href="#informace">Informace</a></li>
@@ -913,17 +1064,26 @@ html{scroll-behavior:smooth}
   <li><a href="#postup"><span class="l-long">Jak mapa vznikla</span><span class="l-short">Postup</span></a></li>
 </ul></div></nav>
 
+<!-- ======================================================================
+     MAPA (id="mapa")
+     Samotnou mapu do <div id="map"> vykreslí JavaScript (blok a).
+     Tlačítka zoomu, vrstev, legendy, celé obrazovky, měřítko a tiráž
+     se do mapy přidávají taky z JavaScriptu.
+     ====================================================================== -->
 <main class="wrap" id="mapa">
   <p class="map-howto">Klikni na pozemek nebo budovu a zobrazí se, co na něm stojí a kdo tam bydlí.</p>
   <div class="mapwrap" id="mapwrap">
+    <!-- sem se vykreslí mapa -->
     <div id="map" role="region" aria-label="Mapa Sunset Valley"></div>
+    <!-- vysouvací panel s vyhledáváním (vlevo) -->
     <div class="drawer" id="drawer" aria-hidden="true">
       <h2>Hledat</h2>
       <input type="search" id="q" placeholder="Název, rodina nebo typ…" autocomplete="off" aria-label="Hledat pozemek nebo budovu">
       <label class="only" for="q-pub"><input type="checkbox" id="q-pub"> Jen veřejná místa a budovy</label>
       <p class="count" id="count"></p>
-      <ul class="results" id="results"></ul>
+      <ul class="results" id="results"></ul>   <!-- výsledky doplní JavaScript -->
     </div>
+    <!-- tlačítko se šipkou, které panel otevírá a zavírá -->
     <button class="drawer-btn" id="drawer-btn" type="button" aria-controls="drawer" aria-expanded="false" aria-label="Otevřít vyhledávání">
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M6 3l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -931,6 +1091,10 @@ html{scroll-behavior:smooth}
   <p class="map-note">Mapa, polohy pozemků i náhledy pochází přímo z dat hry. Domácnosti a obyvatelé jsou z uložených dat světa, jak je hra nabízí na začátku nové hry.</p>
 </main>
 
+<!-- ======================================================================
+     INFORMACE (id="informace") – text o městě, čísla a obrázek simíků
+     Čísla jsou napsaná ručně (spočítaná z dat mapy a výškové mapy).
+     ====================================================================== -->
 <section class="wrap info" id="informace">
   <div class="info-text">
     <h2 class="sec-h">Informace</h2>
@@ -949,16 +1113,23 @@ html{scroll-behavior:smooth}
   <figure class="simove"><img src="simove.webp" alt="Skupina simíků" width="1100" height="689" loading="lazy"></figure>
 </section>
 
+<!-- ======================================================================
+     ZOBRAZENÍ VE 3D (id="model")
+     Na začátku je vidět jen úvodní obrázek s tlačítkem „Spustit 3D model“.
+     Teprve po kliknutí se stáhne knihovna three.js a data (blok b).
+     ====================================================================== -->
 <section class="wrap s3d" id="model">
   <div class="s3d-head">
     <h2>Zobrazení ve 3D</h2>
     <p>Celé údolí v prostoru: terén z výškové mapy hry, velké budovy a parcely s domy. Na budovu nebo pozemek můžeš kliknout.</p>
   </div>
   <div class="viewer" id="viewer">
+    <!-- tlačítko celé obrazovky (dvě ikony: zvětšit / zmenšit) -->
     <button type="button" class="v-fs" id="v-fs" aria-pressed="false" title="3D na celou obrazovku" aria-label="3D na celou obrazovku">
       <svg class="i-open" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
       <svg class="i-close" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
     </button>
+    <!-- úvodní obrázek s tlačítkem -->
     <div class="poster" id="poster">
       <div class="poster-card">
         <strong>Prohlížeč 3D modelu</strong>
@@ -969,6 +1140,9 @@ html{scroll-behavior:smooth}
   </div>
 </section>
 
+<!-- ======================================================================
+     JAK MAPA VZNIKLA (id="postup") – čtyři kroky (čísla doplní CSS samo)
+     ====================================================================== -->
 <section class="wrap postup" id="postup">
   <h2 class="sec-h">Jak mapa vznikla</h2>
   <ol class="steps">
@@ -979,6 +1153,9 @@ html{scroll-behavior:smooth}
   </ol>
 </section>
 
+<!-- ======================================================================
+     PATIČKA – autorka, zdroj a upozornění, které EA vyžaduje u fanouškovských webů
+     ====================================================================== -->
 <footer class="wrap foot">
   <p><b>Autorka:</b> Veronika Plisková, 2026 · <b>Zdroj dat:</b> hra The Sims™ 3 (Electronic Arts Inc.)</p>
   <p>Nekomerční studentský projekt. The Sims™ 3 © Electronic Arts Inc. The Sims a související loga jsou ochranné známky společnosti Electronic Arts Inc. a jejích poskytovatelů licencí. Tento web není podporován společností EA ani jejími poskytovateli licencí a není s nimi nijak spojen.</p>
@@ -986,23 +1163,60 @@ html{scroll-behavior:smooth}
 </footer>
 
 
+<!-- knihovna Leaflet (2D mapa) a data pozemků a budov (vytvoří proměnnou window.SV_DATA) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="data.js"></script>
+
 <script>
+/* ==========================================================================
+   a) 2D MAPA (Leaflet)
+   ========================================================================== */
 (function(){
+
+  /* ---------- pomocné věci ---------- */
+  // formátování čísel česky: 1 234 a 12,5
   const nf=new Intl.NumberFormat('cs-CZ');
   const n1=new Intl.NumberFormat('cs-CZ',{minimumFractionDigits:1,maximumFractionDigits:1});
+  // C('--lot-house') vrátí barvu z CSS proměnné (blok 1), aby barvy na mapě a v legendě byly stejné
   const css=getComputedStyle(document.documentElement);
   const C=k=>css.getPropertyValue(k).trim();
-  const map=L.map('map',{crs:L.CRS.Simple,minZoom:-2,maxZoom:3,zoomSnap:0,zoomDelta:.5,attributionControl:false,zoomControl:false,maxBoundsViscosity:1,bounceAtZoomLimits:false});
+
+  /* ---------- vytvoření mapy ----------
+     CRS.Simple = obyčejná rovinná souřadnicová soustava (ne zeměkoule):
+     1 jednotka mapy = 1 metr ve hře. Mapa má rozsah 0–2 048 × 0–2 048. */
+  const map=L.map('map',{
+    crs:L.CRS.Simple,
+    minZoom:-2, maxZoom:3,        // rozsah přiblížení
+    zoomSnap:0, zoomDelta:.5,     // plynulý zoom po půlkrocích
+    attributionControl:false,     // vlastní tiráž místo výchozí Leaflet
+    zoomControl:false,            // tlačítka zoomu přidáme vpravo (níže)
+    maxBoundsViscosity:1,         // mapu nejde odtáhnout mimo její okraj
+    bounceAtZoomLimits:false
+  });
+
+  // tlačítka + a − vpravo nahoře
   L.control.zoom({position:'topright',zoomInTitle:'Přiblížit',zoomOutTitle:'Oddálit'}).addTo(map);
-  // měřítko: 1 jednotka mapy = 1 m, mění se se zoomem
+
+  /* ---------- měřítko (vlevo dole) ----------
+     Leaflet ho sám přepočítává při zoomování. Na mobilu je kratší. */
   L.control.scale({position:'bottomleft',metric:true,imperial:false,maxWidth:window.innerWidth<600?100:160}).addTo(map);
-  // tiráž (vpravo dole)
-  const Imprint=L.Control.extend({options:{position:'bottomright'},onAdd(){const d=L.DomUtil.create('div','leaflet-control m-imprint');
-    d.innerHTML='<span class="imp-long">Autorka: Veronika Plisková · Zdroj dat: hra The Sims™ 3, © Electronic Arts Inc. · 2026</span><span class="imp-short">V. Plisková · The Sims™ 3 © EA · 2026</span>';L.DomEvent.disableClickPropagation(d);return d;}});
+
+  /* ---------- tiráž (vpravo dole) ----------
+     Dlouhý text na počítači, krátký na mobilu (přepíná CSS, blok 10 a 15). */
+  const Imprint=L.Control.extend({
+    options:{position:'bottomright'},
+    onAdd(){
+      const d=L.DomUtil.create('div','leaflet-control m-imprint');
+      d.innerHTML='<span class="imp-long">Autorka: Veronika Plisková · Zdroj dat: hra The Sims™ 3, © Electronic Arts Inc. · 2026</span>'+
+                  '<span class="imp-short">V. Plisková · The Sims™ 3 © EA · 2026</span>';
+      L.DomEvent.disableClickPropagation(d);   // kliknutí na tiráž neklikne do mapy
+      return d;
+    }
+  });
   new Imprint().addTo(map);
-  // když se tiráž a měřítko vodorovně nevejdou vedle sebe, tiráž se posune nad měřítko
+
+  // Když se tiráž a měřítko vodorovně nevejdou vedle sebe, tiráž se posune nad měřítko.
+  // Kontroluje se po načtení, při zoomu a při změně velikosti okna.
   function fixImprint(){
     const c=map.getContainer(), imp=c.querySelector('.m-imprint'), sc=c.querySelector('.leaflet-control-scale');
     if(!imp||!sc) return;
@@ -1010,11 +1224,17 @@ html{scroll-behavior:smooth}
     const a=imp.getBoundingClientRect(), b=sc.getBoundingClientRect();
     if(a.left<b.right+8) c.classList.add('imp-up');
   }
-  map.on('zoomend resize',fixImprint); window.addEventListener('resize',fixImprint); setTimeout(fixImprint,0);
+  map.on('zoomend resize',fixImprint);
+  window.addEventListener('resize',fixImprint);
+  setTimeout(fixImprint,0);
+
+  /* ---------- podkladový obrázek mapy ----------
+     B = rozsah mapy [[y min, x min], [y max, x max]] v metrech */
   const B=L.latLngBounds([[0,0],[2048,2048]]);
   L.imageOverlay('mapa.jpg',B).addTo(map);
   map.setMaxBounds(B);
-  // nejmenší přiblížení = mapa právě vyplní celé okno, takže okolí mapy nikdy není vidět
+
+  // Nejmenší přiblížení = mapa právě vyplní celé okno, takže okolí mapy (prázdné modré pozadí) nikdy není vidět.
   function fitZoom(){
     const z=map.getBoundsZoom(B,true);
     map.setMinZoom(z);
@@ -1023,99 +1243,176 @@ html{scroll-behavior:smooth}
   }
   fitZoom();
   map.on('resize',fitZoom);
+
+  // V datech jsou souřadnice [x, y]; Leaflet chce [y, x] – tahle funkce je prohodí.
   const ll=c=>L.latLng(c[1],c[0]);
+
+  // esc() = bezpečné vložení textu do HTML (aby se znaky < > & nevyložily jako kód)
   function esc(s){return String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
+
+  /* ---------- obsah karty pozemku / budovy ---------- */
+  // Název: u rodinných domů přidá „Dům „…““
   function title(p){
     if(p.typ==='Rodinný dům' && !/^Rodinný dům$/.test(p.title)) return 'Dům „'+p.title+'“';
     return p.title;
   }
+  // Barevný štítek s typem pod názvem
   function chip(p){
     const cls=p.typ==='Veřejná budova'||p.typ==='Veřejné místo'?'chip pub':(p.typ==='Prázdný pozemek'?'chip emp':'chip');
     return '<span class="'+cls+'">'+esc(p.kind==='bld'?(p.verejna?'Veřejná budova':'Budova'):p.typ)+'</span>';
   }
+  // Složí celé HTML karty z atributů pozemku/budovy (p = properties z data.js).
+  // Atributy: kind (lot = pozemek, bld = budova), title, typ, rodina, w, d, plocha, vyska,
+  //           nahled (cesta k obrázku), obyv (seznam obyvatel s fotkou), popis …
   function popup(p){
-    const rows=[];
+    const rows=[];   // řádky tabulky [popisek, hodnota]
     if(p.rodina) rows.push(['Domácnost',p.rodina]);
     if(p.clenove && !p.obyv) rows.push(['Obyvatelé',p.clenove]);
-    if(p.kind==='lot'){
+    if(p.kind==='lot'){                       // pozemek
       rows.push(['Velikost pozemku',p.w+' × '+p.d+' polí']);
       rows.push(['Plocha',nf.format(p.plocha)+' m²']);
       rows.push(['Nadmořská výška',n1.format(p.vyska)+' m']);
-    } else {
+    } else {                                  // budova
       if(p.podlazi) rows.push(['Podlaží',p.podlazi]);
       if(p.vyska_budovy) rows.push(['Výška budovy',n1.format(p.vyska_budovy)+' m']);
       if(p.plocha) rows.push(['Zastavěná plocha',nf.format(p.plocha)+' m²']);
     }
-    return '<div class="pop">'+(p.nahled?'<img src="'+esc(p.nahled)+'" alt="Náhled pozemku ze hry" loading="lazy">':'')+
+    return '<div class="pop">'+
+      (p.nahled?'<img src="'+esc(p.nahled)+'" alt="Náhled pozemku ze hry" loading="lazy">':'')+   // náhled ze složky nahledy/
       '<div class="b"><h3>'+esc(title(p))+'</h3>'+chip(p)+
       '<dl>'+rows.map(r=>'<dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd>').join('')+'</dl>'+
-      (p.obyv&&p.obyv.length?'<div class="sims-h">Obyvatelé</div><ul class="sims">'+p.obyv.map(s=>'<li>'+(s.foto?'<img src="'+esc(s.foto)+'" alt="" loading="lazy">':'<span class="noimg"></span>')+'<span>'+esc(s.jmeno)+'</span></li>').join('')+'</ul>':'')+
-      (p.popis?'<p>'+esc(p.popis)+'</p>':'')+'</div></div>';
+      // obyvatelé s portréty ze složky simici/
+      (p.obyv&&p.obyv.length?'<div class="sims-h">Obyvatelé</div><ul class="sims">'+
+        p.obyv.map(s=>'<li>'+(s.foto?'<img src="'+esc(s.foto)+'" alt="" loading="lazy">':'<span class="noimg"></span>')+'<span>'+esc(s.jmeno)+'</span></li>').join('')+
+      '</ul>':'')+
+      (p.popis?'<p>'+esc(p.popis)+'</p>':'')+
+      '</div></div>';
   }
+  // zpřístupní funkci i pro 3D model (blok b), aby karta vypadala stejně
   window.SVpopup=p=>popup(p);
-  // informacni karta: pevne v rohu mapy, takze je vzdy cela videt bez ohledu na priblizeni
-  let selected=null; const card=document.createElement('div'); card.className='m-info'; card.hidden=true;
+
+  /* ---------- karta po kliknutí ----------
+     Karta je pevně v rohu mapy (ne bublina u pozemku), takže je vždy celá vidět. */
+  let selected=null;                                   // právě vybraný pozemek/budova
+  const card=document.createElement('div'); card.className='m-info'; card.hidden=true;
   document.getElementById('mapwrap').appendChild(card);
   L.DomEvent.disableClickPropagation(card); L.DomEvent.disableScrollPropagation(card);
-  function unselect(){ if(selected){const k=selected.feature.properties.kind; selected.setStyle({weight:k==='lot'?.6:.4,color:k==='lot'?'#fffbe8':'#2a1714'});} selected=null; card.hidden=true; }
-  function select(layer){
-    unselect(); closeTools(); if(window.innerWidth<700&&wrap.classList.contains('open')) setOpen(false); selected=layer; layer.setStyle({weight:2.4,color:'#ffd84a'}); layer.bringToFront();
-    card.innerHTML='<button class="x" type="button" aria-label="Zavřít">×</button>'+popup(layer.feature.properties);
-    card.querySelector('.x').addEventListener('click',unselect); card.hidden=false; card.scrollTop=0;
+
+  // zruší výběr: vrátí obrys do původního stavu a schová kartu
+  function unselect(){
+    if(selected){
+      const k=selected.feature.properties.kind;
+      selected.setStyle({weight:k==='lot'?.6:.4,color:k==='lot'?'#fffbe8':'#2a1714'});
+    }
+    selected=null; card.hidden=true;
   }
-  map.on('click',unselect);
+  // vybere pozemek/budovu: žlutý obrys + karta s údaji
+  function select(layer){
+    unselect(); closeTools();
+    if(window.innerWidth<700&&wrap.classList.contains('open')) setOpen(false);   // na mobilu zavře vyhledávání, aby se nepřekrývalo s kartou
+    selected=layer;
+    layer.setStyle({weight:2.4,color:'#ffd84a'}); layer.bringToFront();
+    card.innerHTML='<button class="x" type="button" aria-label="Zavřít">×</button>'+popup(layer.feature.properties);
+    card.querySelector('.x').addEventListener('click',unselect);
+    card.hidden=false; card.scrollTop=0;
+  }
+  map.on('click',unselect);   // kliknutí do prázdné mapy kartu zavře
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!card.hidden)unselect();});
-  function lotStyle(f){
+
+  /* ---------- vzhled vrstev ----------
+     color = obrys, weight = tloušťka obrysu, fillColor = výplň, fillOpacity = průhlednost výplně */
+  function lotStyle(f){        // pozemky
     const t=f.properties.typ;
     const col=t==='Prázdný pozemek'?C('--lot-empty'):(t==='Rodinný dům'?C('--lot-house'):C('--lot-public'));
     return {color:'#fffbe8',weight:.6,fillColor:col,fillOpacity:.35,opacity:.8};
   }
-  function bldStyle(f){
+  function bldStyle(f){        // budovy
     const pub=f.properties.verejna||f.properties.typ==='Veřejné místo';
     return {color:'#2a1714',weight:.4,fillColor:pub?C('--bld-public'):C('--bld-house'),fillOpacity:.9,opacity:.7};
   }
-  let lots,blds;
+
+  /* ---------- načtení dat a vykreslení vrstev ----------
+     window.SV_DATA pochází ze souboru data.js (GeoJSON s pozemky i budovami) */
+  let lots,blds;   // vrstva pozemků a vrstva budov
   Promise.resolve(window.SV_DATA).then(gj=>{
-    const lf=gj.features.filter(f=>f.properties.kind==='lot');
-    const bf=gj.features.filter(f=>f.properties.kind==='bld');
+    const lf=gj.features.filter(f=>f.properties.kind==='lot');   // jen pozemky
+    const bf=gj.features.filter(f=>f.properties.kind==='bld');   // jen budovy
+    // co se má stát u každého prvku: kliknutí = výběr, najetí myší = zesílený obrys
     function bind(feature,layer){
       layer.on('click',e=>{L.DomEvent.stopPropagation(e);select(layer);});
       layer.on('mouseover',()=>{if(layer!==selected)layer.setStyle({weight:1.6});});
       layer.on('mouseout',()=>{if(layer!==selected)layer.setStyle({weight:feature.properties.kind==='lot'?.6:.4});});
     }
     lots=L.geoJSON(lf,{coordsToLatLng:ll,style:lotStyle,onEachFeature:bind}).addTo(map);
-    blds=L.geoJSON(bf,{coordsToLatLng:ll,style:bldStyle,onEachFeature:bind}).addTo(map);
+    blds=L.geoJSON(bf,{coordsToLatLng:ll,style:bldStyle,onEachFeature:bind}).addTo(map);   // budovy až po pozemcích, aby byly nahoře
     buildSearch();
   });
-  // vysouvací panel s vyhledáváním
-  const wrap=document.getElementById('mapwrap'), btn=document.getElementById('drawer-btn'), drawer=document.getElementById('drawer'), q=document.getElementById('q'), res=document.getElementById('results'), cnt=document.getElementById('count');
-  function setOpen(o){if(o&&window.innerWidth<700)unselect();wrap.classList.toggle('open',o);btn.setAttribute('aria-expanded',o);drawer.setAttribute('aria-hidden',!o);btn.setAttribute('aria-label',o?'Zavřít vyhledávání':'Otevřít vyhledávání');if(o)setTimeout(()=>q.focus(),260);}
+
+  /* ---------- vysouvací panel s vyhledáváním ---------- */
+  const wrap=document.getElementById('mapwrap'), btn=document.getElementById('drawer-btn'), drawer=document.getElementById('drawer'),
+        q=document.getElementById('q'), res=document.getElementById('results'), cnt=document.getElementById('count');
+  // otevře (o=true) nebo zavře (o=false) panel
+  function setOpen(o){
+    if(o&&window.innerWidth<700) unselect();   // na mobilu zavře kartu, aby nebyla přes panel
+    wrap.classList.toggle('open',o);
+    btn.setAttribute('aria-expanded',o);
+    drawer.setAttribute('aria-hidden',!o);
+    btn.setAttribute('aria-label',o?'Zavřít vyhledávání':'Otevřít vyhledávání');
+    if(o) setTimeout(()=>q.focus(),260);       // kurzor rovnou do políčka hledání
+  }
   btn.addEventListener('click',()=>setOpen(!wrap.classList.contains('open')));
   drawer.addEventListener('keydown',e=>{if(e.key==='Escape'){setOpen(false);btn.focus();}});
   L.DomEvent.disableClickPropagation(drawer); L.DomEvent.disableScrollPropagation(drawer); L.DomEvent.disableClickPropagation(btn);
+
+  // norm() = text bez diakritiky a malými písmeny, aby „skola“ našlo i „Škola“
   const norm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
-  let items=[];
+  let items=[];   // seznam všech pozemků pro hledání
   function buildSearch(){
-    lots.eachLayer(l=>{const p=l.feature.properties; items.push({pub:p.typ==='Veřejná budova'||p.typ==='Veřejné místo',t:title(p),sub:[p.typ,p.rodina?'domácnost '+p.rodina:null].filter(Boolean).join(' · '),key:norm([title(p),p.typ,p.rodina,p.clenove,p.popis].join(' ')),l});});
-    items.sort((a,b)=>a.t.localeCompare(b.t,'cs'));
+    lots.eachLayer(l=>{
+      const p=l.feature.properties;
+      items.push({
+        pub:p.typ==='Veřejná budova'||p.typ==='Veřejné místo',                           // pro filtr „Jen veřejná místa“
+        t:title(p),                                                                        // název ve výsledcích
+        sub:[p.typ,p.rodina?'domácnost '+p.rodina:null].filter(Boolean).join(' · '),       // šedý řádek pod názvem
+        key:norm([title(p),p.typ,p.rodina,p.clenove,p.popis].join(' ')),                  // v čem se hledá
+        l                                                                                  // odkaz na vrstvu (pro přiblížení)
+      });
+    });
+    items.sort((a,b)=>a.t.localeCompare(b.t,'cs'));   // abecedně česky
     render();
   }
+  // vypíše výsledky podle napsaného textu a zaškrtávátka
   function render(){
-    const w=norm(q.value).trim().split(/\s+/).filter(Boolean);
+    const w=norm(q.value).trim().split(/\s+/).filter(Boolean);   // jednotlivá hledaná slova
     const only=document.getElementById('q-pub').checked;
     const hit=items.filter(it=>(!only||it.pub)&&w.every(x=>it.key.includes(x)));
     cnt.textContent=(w.length||only)?('Nalezeno: '+hit.length):('Všechny pozemky: '+items.length);
     res.innerHTML='';
-    hit.forEach(it=>{const li=document.createElement('li'),b=document.createElement('button');b.type='button';b.innerHTML='<b>'+esc(it.t)+'</b><span>'+esc(it.sub)+'</span>';
-      b.addEventListener('click',()=>{map.flyToBounds(it.l.getBounds(),{maxZoom:1.5,duration:.8});setTimeout(()=>select(it.l),300);if(window.innerWidth<700)setOpen(false);});
-      li.appendChild(b);res.appendChild(li);});
+    hit.forEach(it=>{
+      const li=document.createElement('li'),b=document.createElement('button');
+      b.type='button'; b.innerHTML='<b>'+esc(it.t)+'</b><span>'+esc(it.sub)+'</span>';
+      // kliknutí na výsledek: mapa přiletí na pozemek a otevře jeho kartu
+      b.addEventListener('click',()=>{
+        map.flyToBounds(it.l.getBounds(),{maxZoom:1.5,duration:.8});
+        setTimeout(()=>select(it.l),300);
+        if(window.innerWidth<700) setOpen(false);
+      });
+      li.appendChild(b); res.appendChild(li);
+    });
   }
   q.addEventListener('input',render);
   document.getElementById('q-pub').addEventListener('change',render);
-  // tlačítka pod zoomem: vrstvy a legenda
+
+  /* ---------- tlačítka pod zoomem: Vrstvy, Legenda, Celá obrazovka ----------
+     Leaflet je naskládá pod tlačítka + a − (obojí je „topright“). */
   const Tools=L.Control.extend({options:{position:'topright'},onAdd(){
     const d=L.DomUtil.create('div','leaflet-control m-tools');
-    d.innerHTML=`<div class="m-tool"><button type="button" id="b-lay" aria-expanded="false" aria-controls="p-lay" title="Vrstvy" aria-label="Vrstvy">
+    // tři tlačítka pod sebou:
+    //   1) VRSTVY  – okénko se zaškrtávátky Pozemky / Budovy
+    //   2) LEGENDA – barvy berou CSS proměnné z bloku 1; <hr class="leg-sep"> = šedá oddělovací čára
+    //   3) CELÁ OBRAZOVKA – dvě ikony (zvětšit / zmenšit), CSS ukáže tu správnou
+    d.innerHTML=`
+      <div class="m-tool"><button type="button" id="b-lay" aria-expanded="false" aria-controls="p-lay" title="Vrstvy" aria-label="Vrstvy">
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
         <div class="m-pop" id="p-lay" hidden><h2>Vrstvy</h2><div class="toggles">
           <label for="t-lots"><input type="checkbox" id="t-lots" checked> Pozemky</label>
@@ -1133,40 +1430,73 @@ html{scroll-behavior:smooth}
         <svg class="i-open" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
         <svg class="i-close" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>`;
     L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
-    return d;}});
+    return d;
+  }});
   new Tools().addTo(map);
+
+  // otevírání okének Vrstvy a Legenda: otevřené může být vždy jen jedno
   const toolBtns=[['b-lay','p-lay'],['b-leg','p-leg']].map(([b,p])=>[document.getElementById(b),document.getElementById(p)]);
-  function closeTools(except){toolBtns.forEach(([b,p])=>{if(b!==except){b.setAttribute('aria-expanded','false');p.hidden=true;}});}
-  toolBtns.forEach(([b,p])=>b.addEventListener('click',()=>{const o=p.hidden;closeTools(b);p.hidden=!o;b.setAttribute('aria-expanded',o);if(o)unselect();}));
+  function closeTools(except){
+    toolBtns.forEach(([b,p])=>{ if(b!==except){ b.setAttribute('aria-expanded','false'); p.hidden=true; } });
+  }
+  toolBtns.forEach(([b,p])=>b.addEventListener('click',()=>{
+    const o=p.hidden;
+    closeTools(b); p.hidden=!o; b.setAttribute('aria-expanded',o);
+    if(o) unselect();   // při otevření okénka se zavře karta pozemku
+  }));
   map.on('click',()=>closeTools());
-  // mapa na celé okno
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeTools();});
+
+  // zapínání a vypínání vrstev (okénko Vrstvy)
+  document.getElementById('t-lots').addEventListener('change',e=>{
+    if(!lots) return;
+    e.target.checked?lots.addTo(map):map.removeLayer(lots);
+    if(e.target.checked&&blds&&map.hasLayer(blds)) blds.bringToFront();   // budovy zůstanou nad pozemky
+  });
+  document.getElementById('t-bld').addEventListener('change',e=>{
+    if(!blds) return;
+    e.target.checked?blds.addTo(map):map.removeLayer(blds);
+  });
+
+  /* ---------- mapa na celou obrazovku ----------
+     Třída „fs“ roztáhne mapu přes celé okno (CSS blok 6). Navíc se zkusí skutečný
+     režim celé obrazovky prohlížeče; kde nejde (např. iPhone), zůstane jen roztažení přes okno. */
   const mw=document.getElementById('mapwrap'), fsb=document.getElementById('b-fs');
   function setFs(on){
-    mw.classList.toggle('fs',on); document.documentElement.classList.toggle('fs-lock',on);
-    fsb.setAttribute('aria-pressed',on); const t=on?'Zmenšit mapu':'Mapa na celou obrazovku'; fsb.title=t; fsb.setAttribute('aria-label',t);
-    setTimeout(()=>map.invalidateSize(),60);
+    mw.classList.toggle('fs',on);
+    document.documentElement.classList.toggle('fs-lock',on);   // stránka pod mapou se neposouvá
+    fsb.setAttribute('aria-pressed',on);
+    const t=on?'Zmenšit mapu':'Mapa na celou obrazovku'; fsb.title=t; fsb.setAttribute('aria-label',t);
+    setTimeout(()=>map.invalidateSize(),60);                  // Leaflet si přepočítá novou velikost mapy
   }
   fsb.addEventListener('click',()=>{
     const on=!mw.classList.contains('fs');
     if(on){ setFs(true); if(mw.requestFullscreen) mw.requestFullscreen().catch(()=>{}); }
     else { if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); setFs(false); }
   });
+  // ukončení celé obrazovky klávesou Esc nebo gestem prohlížeče
   document.addEventListener('fullscreenchange',()=>{ if(!document.fullscreenElement&&mw.classList.contains('fs')) setFs(false); });
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&mw.classList.contains('fs')&&!document.fullscreenElement) setFs(false); });
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeTools();});
-  document.getElementById('t-lots').addEventListener('change',e=>{ if(!lots) return; e.target.checked?lots.addTo(map):map.removeLayer(lots); if(e.target.checked&&blds&&map.hasLayer(blds)) blds.bringToFront(); });
-  document.getElementById('t-bld').addEventListener('change',e=>{ if(!blds) return; e.target.checked?blds.addTo(map):map.removeLayer(blds); });
 })();
 </script>
 
 <script>
+/* ==========================================================================
+   b) 3D MODEL (three.js)
+   Knihovna i data se stahují až po kliknutí na „Spustit 3D model“,
+   aby se stránka na začátku načítala rychle.
+   ========================================================================== */
 (function(){
   const viewer=document.getElementById('viewer'), start=document.getElementById('start3d');
-  // 3D na celé okno
+
+  /* ---------- 3D na celou obrazovku (stejný princip jako u mapy) ---------- */
   const vfs=document.getElementById('v-fs');
   function setVfs(on){
-    viewer.classList.toggle('fs',on); document.documentElement.classList.toggle('fs-lock',on);
-    vfs.setAttribute('aria-pressed',on); const t=on?'Zmenšit 3D zobrazení':'3D na celou obrazovku'; vfs.title=t; vfs.setAttribute('aria-label',t);
+    viewer.classList.toggle('fs',on);
+    document.documentElement.classList.toggle('fs-lock',on);
+    vfs.setAttribute('aria-pressed',on);
+    const t=on?'Zmenšit 3D zobrazení':'3D na celou obrazovku'; vfs.title=t; vfs.setAttribute('aria-label',t);
+    // velikost 3D obrazu se přepočítá sama (ResizeObserver níže)
   }
   vfs.addEventListener('click',()=>{
     const on=!viewer.classList.contains('fs');
@@ -1175,88 +1505,170 @@ html{scroll-behavior:smooth}
   });
   document.addEventListener('fullscreenchange',()=>{ if(!document.fullscreenElement&&viewer.classList.contains('fs')) setVfs(false); });
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&viewer.classList.contains('fs')&&!document.fullscreenElement) setVfs(false); });
-  const libs=['https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js','https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js','https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js'];
+
+  /* ---------- pomocné funkce ---------- */
+  // knihovny: three.js, načítač modelů GLTF/GLB a ovládání kamery myší/prsty
+  const libs=[
+    'https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js',
+    'https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js',
+    'https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js'
+  ];
+  // load(src) = načte .js soubor až teď (vloží <script> do stránky)
   function load(src){return new Promise((ok,err)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>err(new Error(src));document.head.appendChild(s);});}
-  function status(t){let el=viewer.querySelector('.v-status'); if(!t){el&&el.remove();return;} if(!el){el=document.createElement('div');el.className='v-status';viewer.appendChild(el);} el.textContent=t;}
-  // 3D data jsou v .js souborech (base64), aby web šel otevřít i přímo z disku (file://)
-  async function bin(n){ if(!(window.SV3D&&SV3D[n])) await load('3d/'+n+'.js'); const s=SV3D[n]; delete SV3D[n];
-    const r=atob(s), u=new Uint8Array(r.length); for(let i=0;i<r.length;i++) u[i]=r.charCodeAt(i); return u.buffer; }
+  // status('text') = hláška uprostřed 3D okna; status(null) ji schová
+  function status(t){
+    let el=viewer.querySelector('.v-status');
+    if(!t){el&&el.remove();return;}
+    if(!el){el=document.createElement('div');el.className='v-status';viewer.appendChild(el);}
+    el.textContent=t;
+  }
+  // 3D data jsou ve složce 3d/ jako .js soubory s binárními daty zakódovanými do textu (base64).
+  // Díky tomu web funguje i po otevření přímo z disku (file://), kde prohlížeč nedovolí načíst .glb.
+  // bin('parcely') načte 3d/parcely.js a vrátí původní binární data.
+  async function bin(n){
+    if(!(window.SV3D&&SV3D[n])) await load('3d/'+n+'.js');
+    const s=SV3D[n]; delete SV3D[n];   // uvolní paměť
+    const r=atob(s), u=new Uint8Array(r.length);
+    for(let i=0;i<r.length;i++) u[i]=r.charCodeAt(i);
+    return u.buffer;
+  }
+  // textura terénu (3d/teren_tex.js) jako obrázek data:image/jpeg
   async function texUrl(){ if(!(window.SV3D&&SV3D.teren_tex)) await load('3d/teren_tex.js'); return SV3D.teren_tex; }
+
+  /* ---------- tlačítko „Spustit 3D model“ ---------- */
   start.addEventListener('click',async()=>{
-    document.getElementById('poster').remove(); status('Načítám knihovnu pro 3D…');
-    try{ for(const l of libs) await load(l); }catch(e){ status('Knihovnu pro 3D se nepodařilo načíst. Zkontroluj připojení a obnov stránku.'); return; }
+    document.getElementById('poster').remove();   // zmizí úvodní obrázek
+    status('Načítám knihovnu pro 3D…');
+    try{ for(const l of libs) await load(l); }
+    catch(e){ status('Knihovnu pro 3D se nepodařilo načíst. Zkontroluj připojení a obnov stránku.'); return; }
     init().catch(e=>{console.error(e); status('Model se nepodařilo načíst: '+e.message);});
   });
+
+  /* ---------- sestavení 3D scény ---------- */
   async function init(){
-    const W=()=>viewer.clientWidth, H=()=>viewer.clientHeight;
+    const W=()=>viewer.clientWidth, H=()=>viewer.clientHeight;   // aktuální velikost okna prohlížeče
+
+    // renderer = kreslí scénu do <canvas>
     const renderer=new THREE.WebGLRenderer({antialias:true});
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2)); renderer.setSize(W(),H());
     renderer.outputEncoding=THREE.sRGBEncoding;
     viewer.appendChild(renderer.domElement);
+
+    // scéna: světle modrá obloha a mlha v dálce
     const scene=new THREE.Scene(); scene.background=new THREE.Color(0xcfdce6); scene.fog=new THREE.Fog(0xcfdce6,1800,5200);
+
+    // kamera: HOME = výchozí pohled (poloha kamery a bod, na který se dívá; souřadnice v metrech, střed světa = 0,0)
     const camera=new THREE.PerspectiveCamera(45,W()/H(),2,12000);
     const HOME={pos:new THREE.Vector3(-1150,520,180),tgt:new THREE.Vector3(60,40,40)};
     camera.position.copy(HOME.pos);
+
+    // ovládání: otáčení, přiblížení, posun; kamera nejde pod terén ani příliš blízko/daleko
     const ctl=new THREE.OrbitControls(camera,renderer.domElement);
-    ctl.target.copy(HOME.tgt); ctl.enableDamping=true; ctl.dampingFactor=.08; ctl.maxPolarAngle=Math.PI/2-0.06; ctl.minDistance=25; ctl.maxDistance=3200; ctl.screenSpacePanning=false;
+    ctl.target.copy(HOME.tgt);
+    ctl.enableDamping=true; ctl.dampingFactor=.08;     // plynulé dobrzdění pohybu
+    ctl.maxPolarAngle=Math.PI/2-0.06;                  // nejde se podívat zespodu
+    ctl.minDistance=25; ctl.maxDistance=3200;
+    ctl.screenSpacePanning=false;
+
+    // světla: rozptýlené světlo z oblohy + „slunce“
     scene.add(new THREE.HemisphereLight(0xffffff,0x6b7a5a,.95));
     const sun=new THREE.DirectionalLight(0xffffff,.55); sun.position.set(-600,900,-300); scene.add(sun);
-    // teren
+
+    /* ---- terén z výškové mapy ----
+       3d/teren.js = výšková mapa 513 × 513 bodů (krok 4 m), hodnoty 0–65 535;
+       výška v metrech = hodnota / 65,536. Z bodů se poskládá síť trojúhelníků. */
     status('Načítám terén…');
     const [buf,tex]=await Promise.all([bin('teren'),texUrl().then(u=>new Promise((ok,err)=>new THREE.TextureLoader().load(u,ok,undefined,err)))]);
     tex.encoding=THREE.sRGBEncoding; tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
     const h=new Uint16Array(buf), N=513, pos=new Float32Array(N*N*3), uv=new Float32Array(N*N*2);
-    for(let j=0;j<N;j++)for(let i=0;i<N;i++){const k=j*N+i;pos[k*3]=i*4-1024;pos[k*3+1]=h[k]/65.536;pos[k*3+2]=j*4-1024;uv[k*2]=i/(N-1);uv[k*2+1]=1-j/(N-1);}
+    // poloha každého bodu (x, výška, z) a jeho místo na textuře (uv)
+    for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+      const k=j*N+i;
+      pos[k*3]=i*4-1024; pos[k*3+1]=h[k]/65.536; pos[k*3+2]=j*4-1024;
+      uv[k*2]=i/(N-1); uv[k*2+1]=1-j/(N-1);
+    }
+    // každý čtvereček sítě = 2 trojúhelníky
     const idx=new Uint32Array((N-1)*(N-1)*6); let p=0;
-    for(let j=0;j<N-1;j++)for(let i=0;i<N-1;i++){const a=j*N+i,b=a+1,c=a+N,d=c+1;idx[p++]=a;idx[p++]=c;idx[p++]=b;idx[p++]=b;idx[p++]=c;idx[p++]=d;}
-    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('uv',new THREE.BufferAttribute(uv,2)); g.setIndex(new THREE.BufferAttribute(idx,1)); g.computeVertexNormals();
+    for(let j=0;j<N-1;j++)for(let i=0;i<N-1;i++){
+      const a=j*N+i,b=a+1,c=a+N,d=c+1;
+      idx[p++]=a;idx[p++]=c;idx[p++]=b; idx[p++]=b;idx[p++]=c;idx[p++]=d;
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+    g.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+    g.setIndex(new THREE.BufferAttribute(idx,1));
+    g.computeVertexNormals();   // stínování svahů
     const terrain=new THREE.Mesh(g,new THREE.MeshLambertMaterial({map:tex})); scene.add(terrain);
+
+    // moře: poloprůhledná modrá plocha ve výšce hladiny 28,07 m
     const sea=new THREE.Mesh(new THREE.PlaneGeometry(12000,12000),new THREE.MeshLambertMaterial({color:0x3f7fa8,transparent:true,opacity:.72}));
     sea.rotation.x=-Math.PI/2; sea.position.y=28.07; scene.add(sea);
+
+    // smyčka vykreslování (asi 60× za sekundu)
     let raf; function loop(){raf=requestAnimationFrame(loop); ctl.update(); renderer.render(scene,camera);} loop();
+    // když se změní velikost okna (např. celá obrazovka), přepočítá se obraz
     new ResizeObserver(()=>{renderer.setSize(W(),H());camera.aspect=W()/H();camera.updateProjectionMatrix();}).observe(viewer);
-    // modely
-    const loader=new THREE.GLTFLoader(); const groups={budovy:new THREE.Group(),parcely:new THREE.Group()};
+
+    /* ---- modely budov a parcel (formát GLB) ----
+       budovy_a, budovy_b = velké veřejné budovy; ostatni = maják, raketa…; parcely = pozemky s domy */
+    const loader=new THREE.GLTFLoader();
+    const groups={budovy:new THREE.Group(),parcely:new THREE.Group()};   // dvě skupiny kvůli zapínání/vypínání
     scene.add(groups.budovy,groups.parcely);
     const files=[['budovy_a','budovy'],['budovy_b','budovy'],['ostatni','budovy'],['parcely','parcely']];
     let done=0;
     status('Načítám budovy a parcely… 0 / '+files.length);
     await Promise.all(files.map(([f,grp])=>bin(f).then(ab=>new Promise((ok)=>loader.parse(ab,'',gl=>{
-      gl.scene.traverse(o=>{if(o.isMesh){o.material.side=THREE.DoubleSide; if(o.material.map) o.material.map.anisotropy=4;}});
-      groups[grp].add(gl.scene); done++; status('Načítám budovy a parcely… '+done+' / '+files.length); ok();
+      gl.scene.traverse(o=>{ if(o.isMesh){ o.material.side=THREE.DoubleSide; if(o.material.map) o.material.map.anisotropy=4; } });
+      groups[grp].add(gl.scene);
+      done++; status('Načítám budovy a parcely… '+done+' / '+files.length); ok();
     },e=>{console.error(e);done++;ok();}))).catch(e=>{console.error(e);done++;})));
-    status(null);
-    // ovladani
+    status(null);   // vše načteno, hláška zmizí
+
+    /* ---- ovládací panel vpravo nahoře ---- */
     const tools=document.createElement('div'); tools.className='v-tools';
-    tools.innerHTML='<label for="v-b"><input type="checkbox" id="v-b" checked> Budovy</label><label for="v-p"><input type="checkbox" id="v-p" checked> Parcely</label><label for="v-s"><input type="checkbox" id="v-s" checked> Moře</label><button class="btn ghost" id="v-home" type="button">Výchozí pohled</button>';
+    tools.innerHTML='<label for="v-b"><input type="checkbox" id="v-b" checked> Budovy</label>'+
+                    '<label for="v-p"><input type="checkbox" id="v-p" checked> Parcely</label>'+
+                    '<label for="v-s"><input type="checkbox" id="v-s" checked> Moře</label>'+
+                    '<button class="btn ghost" id="v-home" type="button">Výchozí pohled</button>';
     viewer.appendChild(tools);
     tools.querySelector('#v-b').addEventListener('change',e=>groups.budovy.visible=e.target.checked);
     tools.querySelector('#v-p').addEventListener('change',e=>groups.parcely.visible=e.target.checked);
     tools.querySelector('#v-s').addEventListener('change',e=>sea.visible=e.target.checked);
     tools.querySelector('#v-home').addEventListener('click',()=>{camera.position.copy(HOME.pos);ctl.target.copy(HOME.tgt);});
-    const help=document.createElement('div'); help.className='v-help'; help.textContent=matchMedia('(pointer:coarse)').matches?'Jeden prst: otáčení · dva prsty: přiblížení a posun':'Tažení: otáčení · kolečko: přiblížení · pravé tlačítko: posun';
+
+    // nápověda vlevo dole (jiná pro dotykové displeje a pro myš)
+    const help=document.createElement('div'); help.className='v-help';
+    help.textContent=matchMedia('(pointer:coarse)').matches?'Jeden prst: otáčení · dva prsty: přiblížení a posun':'Tažení: otáčení · kolečko: přiblížení · pravé tlačítko: posun';
     viewer.appendChild(help);
-    // klikani na budovy a pozemky
+
+    /* ---- klikání na budovy a pozemky ve 3D ----
+       Každý model má v sobě uložené, ke kterému pozemku patří (userData.lot) nebo jaká je to budova (userData.budova).
+       Podle toho se najdou údaje v data.js a ukáže se stejná karta jako na mapě. */
     const data=window.SV_DATA;
-    const byLot={}; data.features.forEach(f=>{if(f.properties.kind==='lot') byLot[f.properties.interni]=f.properties;});
-    const pubB={}; data.features.forEach(f=>{const q=f.properties; if(q.kind==='bld'&&q.verejna) pubB[q.title]=q;});
+    const byLot={}; data.features.forEach(f=>{if(f.properties.kind==='lot') byLot[f.properties.interni]=f.properties;});          // pozemky podle interního jména
+    const pubB={}; data.features.forEach(f=>{const q=f.properties; if(q.kind==='bld'&&q.verejna) pubB[q.title]=q;});              // veřejné budovy podle názvu
+    // převod názvů budov z 3D modelů na české názvy v datech
     const czMap={Radnice:'Radnice',Skola:'Škola',Jidelna:'Jídelna',Nemocnice:'Nemocnice',Divadlo:'Divadlo',Obchod_s_potravinami:'Obchod s potravinami',Knihkupectvi:'Knihkupectví',Firma_a_noviny:'Firma a redakce novin',Policejni_stanice:'Policejní stanice',Vojenska_zakladna:'Vojenská základna',Mauzoleum:'Mauzoleum',Ukryt_zlocincu:'Úkryt zločinců',Stadion:'Stadion',Lazne:'Lázně',Vedecka_laborator:'Vědecká laboratoř',Bistro:'Bistro'};
+    // raycaster = „paprsek“ z místa kliknutí do scény, zjistí, na co se kliklo
     const ray=new THREE.Raycaster(), m=new THREE.Vector2(); let down=null;
     renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
     renderer.domElement.addEventListener('pointerup',e=>{
-      if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5) return;
-      const r=renderer.domElement.getBoundingClientRect(); m.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);
+      if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5) return;   // posun myší o víc než 5 px = otáčení, ne kliknutí
+      const r=renderer.domElement.getBoundingClientRect();
+      m.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);
       ray.setFromCamera(m,camera);
       const hits=ray.intersectObjects([groups.budovy,groups.parcely].filter(g=>g.visible),true);
-      if(!hits.length){closeInfo();return;}
+      if(!hits.length){closeInfo();return;}   // kliknutí do prázdna kartu zavře
       let o=hits[0].object; while(o&&!(o.userData&&('lot' in o.userData))) o=o.parent;
       if(!o) return;
       const u=o.userData; let props=null;
       if(u.budova&&czMap[u.budova]) props=pubB[czMap[u.budova]];
-      else if(u.budova) props={kind:'bld',verejna:true,title:u.budova,typ:'Veřejná budova',plocha:0,popis:u.budova==='Maják'?'Maják na skalnatém ostrůvku u západního pobřeží.':'Raketová rampa s hangárem u vojenské základny.'};
+      else if(u.budova) props={kind:'bld',verejna:true,title:u.budova,typ:'Veřejná budova',plocha:0,   // maják a raketa nejsou v data.js
+        popis:u.budova==='Maják'?'Maják na skalnatém ostrůvku u západního pobřeží.':'Raketová rampa s hangárem u vojenské základny.'};
       if(!props&&u.lot) props=byLot[u.lot];
       if(props) showInfo(props);
     });
+    // karta budovy ve 3D (používá funkci SVpopup z bloku a)
     let info=null;
     function closeInfo(){info&&info.remove();info=null;}
     function showInfo(pr){
@@ -1270,12 +1682,24 @@ html{scroll-behavior:smooth}
 </script>
 
 <script>
-(function(){const links=[...document.querySelectorAll('.topnav a')];
-  const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
-  function upd(){let k=0;secs.forEach((t,i)=>{if(t&&t.getBoundingClientRect().top<=window.innerHeight*0.35)k=i;});
-    if(window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-4)k=secs.length-1;
-    links.forEach((a,i)=>{a.classList.toggle('on',i===k);if(i===k)a.setAttribute('aria-current','true');else a.removeAttribute('aria-current');});}
-  window.addEventListener('scroll',upd,{passive:true});window.addEventListener('resize',upd);upd();})();
+/* ==========================================================================
+   c) HORNÍ MENU – zvýrazní položku části, ve které právě jsi
+   ========================================================================== */
+(function(){
+  const links=[...document.querySelectorAll('.topnav a')];
+  const secs=links.map(a=>document.querySelector(a.getAttribute('href')));   // části stránky podle odkazů
+  function upd(){
+    let k=0;
+    // aktivní je poslední část, jejíž začátek už je v horní třetině okna
+    secs.forEach((t,i)=>{ if(t&&t.getBoundingClientRect().top<=window.innerHeight*0.35) k=i; });
+    // úplně dole na stránce je aktivní poslední položka
+    if(window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-4) k=secs.length-1;
+    links.forEach((a,i)=>{ a.classList.toggle('on',i===k); if(i===k) a.setAttribute('aria-current','true'); else a.removeAttribute('aria-current'); });
+  }
+  window.addEventListener('scroll',upd,{passive:true});
+  window.addEventListener('resize',upd);
+  upd();
+})();
 </script>
 </body>
 </html>
