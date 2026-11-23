@@ -819,6 +819,8 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 .mapwrap.fs #map{height:100vh;height:100dvh;border:0;border-radius:0}
 /* vlastní úpravy vzhledu Leafletu */
 .leaflet-container{font-family:var(--body);background:var(--sea)}
+/* názvy ulic: tmavě šedé písmo s bílým obrysem, jako na OpenStreetMap */
+.ulice-txt{font-family:var(--body);font-size:12px;font-weight:600;fill:#3a3a3a;stroke:#ffffff;stroke-width:3px;stroke-linejoin:round;paint-order:stroke fill;letter-spacing:.02em;dominant-baseline:central;pointer-events:none}
 .leaflet-bar a{background:var(--surface);color:var(--fg);border-color:var(--line)}   /* tlačítka + a − */
 
 /* --------------------------------------------------------------------------
@@ -1085,7 +1087,7 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     <!-- vysouvací panel s vyhledáváním (vlevo) -->
     <div class="drawer" id="drawer" aria-hidden="true">
       <h2>Hledat</h2>
-      <input type="search" id="q" placeholder="Název, rodina nebo typ…" autocomplete="off" aria-label="Hledat pozemek nebo budovu">
+      <input type="search" id="q" placeholder="Název, adresa, rodina nebo typ…" autocomplete="off" aria-label="Hledat pozemek nebo budovu">
       <label class="only" for="q-pub"><input type="checkbox" id="q-pub"> Jen veřejná místa a budovy</label>
       <p class="count" id="count"></p>
       <ul class="results" id="results"></ul>   <!-- výsledky doplní JavaScript -->
@@ -1273,6 +1275,7 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
   //           nahled (cesta k obrázku), obyv (seznam obyvatel s fotkou), popis …
   function popup(p){
     const rows=[];   // řádky tabulky [popisek, hodnota]
+    if(p.adresa) rows.push(['Adresa',p.adresa]);
     if(p.rodina) rows.push(['Domácnost',p.rodina]);
     if(p.clenove && !p.obyv) rows.push(['Obyvatelé',p.clenove]);
     if(p.kind==='lot'){                       // pozemek
@@ -1353,7 +1356,59 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     lots=L.geoJSON(lf,{coordsToLatLng:ll,style:lotStyle,onEachFeature:bind}).addTo(map);
     blds=L.geoJSON(bf,{coordsToLatLng:ll,style:bldStyle,onEachFeature:bind}).addTo(map);   // budovy až po pozemcích, aby byly nahoře
     buildSearch();
+    addStreetNames();
   });
+
+  /* ---------- názvy ulic (popisky podél silnic jako na OpenStreetMap) ----------
+     Data: window.SV_ULICE z data.js (čáry silnic s názvem ulice).
+     Každá ulice je neviditelná čára; podél ní se vykreslí text pomocí SVG <textPath>.
+     Popisky jsou ve vlastní vrstvě („pane“) nad pozemky a budovami a nedají se na ně kliknout. */
+  const ULICE_OD_ZOOMU=-0.25;                          // od jakého přiblížení se názvy ukazují
+  map.createPane('ulice');
+  map.getPane('ulice').style.zIndex=450;               // nad pozemky a budovami (400)
+  map.getPane('ulice').style.pointerEvents='none';
+  const streetRenderer=L.svg({pane:'ulice',padding:.5});
+  const streets=L.layerGroup();                        // vrstva s popisky ulic (zapíná se v okénku Vrstvy)
+  const SVGNS='http://www.w3.org/2000/svg';
+  let streetTexts=[];                                  // [{path, text}] pro kontrolu délky
+  function addStreetNames(){
+    const fs=(window.SV_ULICE&&SV_ULICE.features)||[];
+    fs.forEach((f,i)=>{
+      let c=f.geometry.coordinates;
+      // směr čáry tak, aby text nebyl vzhůru nohama: rozhoduje směr čáry uprostřed (tam je popisek)
+      let tot=0; const seg=[];
+      for(let k=1;k<c.length;k++){ const l=Math.hypot(c[k][0]-c[k-1][0],c[k][1]-c[k-1][1]); seg.push(l); tot+=l; }
+      let acc=0,k=0; while(k<seg.length-1&&acc+seg[k]<tot/2){ acc+=seg[k]; k++; }
+      const dx=c[k+1][0]-c[k][0], dy=c[k+1][1]-c[k][1];
+      if(Math.abs(dx)>=Math.abs(dy)*0.3? dx<0 : dy<0) c=c.slice().reverse();   // zleva doprava, u téměř svislých zdola nahoru
+      const line=L.polyline(c.map(ll),{renderer:streetRenderer,interactive:false,opacity:0,weight:1,noClip:true,smoothFactor:0});
+      line.on('add',()=>{
+        const path=line._path, id='ulice-'+i;
+        path.setAttribute('id',id);
+        const t=document.createElementNS(SVGNS,'text'); t.setAttribute('class','ulice-txt');
+        const tp=document.createElementNS(SVGNS,'textPath');
+        tp.setAttribute('href','#'+id); tp.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href','#'+id);
+        tp.setAttribute('startOffset','50%'); tp.setAttribute('text-anchor','middle');
+        tp.textContent=f.properties.nazev;
+        t.appendChild(tp); path.parentNode.appendChild(t);
+        streetTexts.push({path,t,line});
+        line.on('remove',()=>{ t.remove(); streetTexts=streetTexts.filter(o=>o.t!==t); });
+      });
+      streets.addLayer(line);
+    });
+    streets.addTo(map);
+    updateStreetNames();
+  }
+  // ukáže popisky jen při dostatečném přiblížení a jen tam, kde se název vejde podél silnice
+  function updateStreetNames(){
+    const show=map.getZoom()>=ULICE_OD_ZOOMU;
+    streetTexts.forEach(o=>{
+      let ok=show;
+      if(ok){ try{ ok=o.path.getTotalLength()>o.t.getComputedTextLength()+16; }catch(e){} }
+      o.t.style.display=ok?'':'none';
+    });
+  }
+  map.on('zoomend viewreset resize',()=>setTimeout(updateStreetNames,0));
 
   /* ---------- vysouvací panel s vyhledáváním ---------- */
   const wrap=document.getElementById('mapwrap'), btn=document.getElementById('drawer-btn'), drawer=document.getElementById('drawer'),
@@ -1380,8 +1435,8 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
       items.push({
         pub:p.typ==='Veřejná budova'||p.typ==='Veřejné místo',                           // pro filtr „Jen veřejná místa“
         t:title(p),                                                                        // název ve výsledcích
-        sub:[p.typ,p.rodina?'domácnost '+p.rodina:null].filter(Boolean).join(' · '),       // šedý řádek pod názvem
-        key:norm([title(p),p.typ,p.rodina,p.clenove,p.popis].join(' ')),                  // v čem se hledá
+        sub:[p.adresa,p.typ,p.rodina?'domácnost '+p.rodina:null].filter(Boolean).join(' · '),       // šedý řádek pod názvem
+        key:norm([title(p),p.adresa,p.typ,p.rodina,p.clenove,p.popis].join(' ')),                  // v čem se hledá
         l                                                                                  // odkaz na vrstvu (pro přiblížení)
       });
     });
@@ -1423,7 +1478,8 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
         <div class="m-pop" id="p-lay" hidden><h2>Vrstvy</h2><div class="toggles">
           <label for="t-lots"><input type="checkbox" id="t-lots" checked> Pozemky</label>
-          <label for="t-bld"><input type="checkbox" id="t-bld" checked> Budovy</label></div></div></div>
+          <label for="t-bld"><input type="checkbox" id="t-bld" checked> Budovy</label>
+          <label for="t-ul"><input type="checkbox" id="t-ul" checked> Názvy ulic</label></div></div></div>
       <div class="m-tool"><button type="button" id="b-leg" aria-expanded="false" aria-controls="p-leg" title="Legenda" aria-label="Legenda">
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="10" width="5" height="4" rx="1"/><rect x="3" y="16" width="5" height="4" rx="1"/><path d="M11 6h10M11 12h10M11 18h10"/></svg></button>
         <div class="m-pop" id="p-leg" hidden><h2>Legenda</h2><div class="legend">
@@ -1459,6 +1515,10 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     if(!lots) return;
     e.target.checked?lots.addTo(map):map.removeLayer(lots);
     if(e.target.checked&&blds&&map.hasLayer(blds)) blds.bringToFront();   // budovy zůstanou nad pozemky
+  });
+  document.getElementById('t-ul').addEventListener('change',e=>{
+    e.target.checked?streets.addTo(map):map.removeLayer(streets);
+    if(e.target.checked) setTimeout(updateStreetNames,0);
   });
   document.getElementById('t-bld').addEventListener('change',e=>{
     if(!blds) return;
