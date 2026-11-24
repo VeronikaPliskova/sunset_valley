@@ -1,3 +1,4 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <!DOCTYPE html>
 <!--
 ================================================================================
@@ -874,6 +875,16 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 .legend{display:grid;grid-template-columns:22px 1fr;gap:7px 10px;align-items:center;font-size:.92rem}
 .m-pop .legend{font-size:.88rem}
 .sw{width:22px;height:14px;border-radius:4px;border:1px solid rgba(0,0,0,.25)}
+.m-pop-leg{width:250px;max-height:min(70vh,560px);overflow:auto}
+.sw-srafa{background:repeating-linear-gradient(45deg,#b0463c 0 1.6px,#d9c3ad 1.6px 5px)}
+.sw-silnice{height:6px!important;border-radius:3px;background:#737373;border:2px solid #e1e1e1!important}
+.leg-poi{width:22px;height:22px;border-radius:50%;background:#fff;border:1px solid #9c9c9c;display:grid;place-items:center}
+.leg-poi img{width:16px;height:16px;object-fit:contain}
+/* ikony veřejných míst na mapě: bílý kroužek s ikonou (jako v ArcGIS) */
+.poi{background:none;border:0}
+.poi-c{position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;background:#fff;border:1px solid #9c9c9c;box-shadow:0 1px 3px rgba(0,0,0,.3);display:grid;place-items:center;cursor:pointer}
+.poi-c img{width:21px;height:21px;object-fit:contain;margin-top:-2px}
+.poi:hover .poi-c{transform:scale(1.12)}
 .leg-sep{grid-column:1 / -1;border:0;border-top:1px solid #c4c4c4;margin:3px 0;width:100%}
 /* ikona tlačítka celé obrazovky: rohy ven (zvětšit) / rohy dovnitř (zmenšit) – platí pro mapu (#b-fs) i 3D (.v-fs) */
 #b-fs .i-close,.v-fs .i-close{display:none}
@@ -1238,9 +1249,13 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
   setTimeout(fixImprint,0);
 
   /* ---------- podkladový obrázek mapy ----------
-     B = rozsah mapy [[y min, x min], [y max, x max]] v metrech */
+     B = rozsah mapy [[y min, x min], [y max, x max]] v metrech.
+     Dva podklady (přepínají se v okénku Vrstvy):
+       podklad.jpg = stínovaný reliéf z DEM se stejnou barevnou škálou jako mapa v ArcGIS Pro
+       mapa.jpg    = textura terénu přímo ze hry */
   const B=L.latLngBounds([[0,0],[2048,2048]]);
-  L.imageOverlay('mapa.jpg',B).addTo(map);
+  const basemaps={relief:L.imageOverlay('podklad.jpg',B,{pane:'tilePane'}), hra:L.imageOverlay('mapa.jpg',B,{pane:'tilePane'})};   // ve spodní vrstvě (tilePane), aby silnice a pozemky byly nad ním
+  basemaps.relief.addTo(map);
   map.setMaxBounds(B);
 
   // Nejmenší přiblížení = mapa právě vyplní celé okno, takže okolí mapy (prázdné modré pozadí) nikdy není vidět.
@@ -1312,7 +1327,7 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
   function unselect(){
     if(selected){
       const k=selected.feature.properties.kind;
-      selected.setStyle({weight:k==='lot'?.6:.4,color:k==='lot'?'#fffbe8':'#2a1714'});
+      selected.setStyle({weight:k==='lot'?LOT_W:.4,color:k==='lot'?LOT_LINE:'#2a1714'});
     }
     selected=null; card.hidden=true;
   }
@@ -1331,10 +1346,26 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 
   /* ---------- vzhled vrstev ----------
      color = obrys, weight = tloušťka obrysu, fillColor = výplň, fillOpacity = průhlednost výplně */
+  // Barvy pozemků podle symbologie v ArcGIS Pro (převedené z CMYK do RGB):
+  //   Prázdný pozemek        C0 M15 Y50 K0   → #ffd980
+  //   Rodinný dům            C0 M10 Y20 K15  → #d9c3ad
+  //   Rodinný dům s rodinou  stejná barva + šrafa 45° (C0 M60 Y66 K31 → #b0463c), vzor „srafa“ níže
+  //   Veřejná budova / místo C25 M15 Y10 K0  → #bfd9e5
+  //   obrys všech pozemků    K35             → #a6a6a6
+  const LOT_FILL={'Prázdný pozemek':'#ffd980','Rodinný dům':'#d9c3ad','Rodinný dům s rodinou':'url(#srafa)','Veřejná budova':'#bfd9e5','Veřejné místo':'#bfd9e5'};
+  const LOT_LINE='#a6a6a6', LOT_W=.8;
   function lotStyle(f){        // pozemky
-    const t=f.properties.typ;
-    const col=t==='Prázdný pozemek'?C('--lot-empty'):(t==='Rodinný dům'?C('--lot-house'):C('--lot-public'));
-    return {color:'#fffbe8',weight:.6,fillColor:col,fillOpacity:.35,opacity:.8};
+    const t=f.properties.typ_mapa||f.properties.typ;
+    return {color:LOT_LINE,weight:LOT_W,fillColor:LOT_FILL[t]||'#bfd9e5',fillOpacity:1,opacity:1};
+  }
+  // šrafovací vzor pro obydlené domy: vloží se do SVG, ve kterém Leaflet kreslí pozemky
+  function addHatch(){
+    const svg=document.querySelector('#map .leaflet-overlay-pane svg'); if(!svg||svg.querySelector('#srafa')) return;
+    const NS='http://www.w3.org/2000/svg';
+    const defs=document.createElementNS(NS,'defs');
+    defs.innerHTML='<pattern id="srafa" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">'+
+      '<rect width="7" height="7" fill="#d9c3ad"></rect><line x1="0" y1="0" x2="0" y2="7" stroke="#b0463c" stroke-width="1.6"></line></pattern>';
+    svg.insertBefore(defs,svg.firstChild);
   }
   function bldStyle(f){        // budovy
     const pub=f.properties.verejna||f.properties.typ==='Veřejné místo';
@@ -1351,13 +1382,77 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     function bind(feature,layer){
       layer.on('click',e=>{L.DomEvent.stopPropagation(e);select(layer);});
       layer.on('mouseover',()=>{if(layer!==selected)layer.setStyle({weight:1.6});});
-      layer.on('mouseout',()=>{if(layer!==selected)layer.setStyle({weight:feature.properties.kind==='lot'?.6:.4});});
+      layer.on('mouseout',()=>{if(layer!==selected)layer.setStyle({weight:feature.properties.kind==='lot'?LOT_W:.4});});
     }
+    addRoads();                                                        // silnice (pod pozemky, vlastní vrstva)
     lots=L.geoJSON(lf,{coordsToLatLng:ll,style:lotStyle,onEachFeature:bind}).addTo(map);
-    blds=L.geoJSON(bf,{coordsToLatLng:ll,style:bldStyle,onEachFeature:bind}).addTo(map);   // budovy až po pozemcích, aby byly nahoře
+    addHatch();
+    blds=L.geoJSON(bf,{coordsToLatLng:ll,style:bldStyle,onEachFeature:bind});   // budovy: jako v ArcGIS jsou na začátku vypnuté (zapínají se ve Vrstvách)
     buildSearch();
     addStreetNames();
+    addPlaces();                                                       // ikony veřejných míst
   });
+
+  /* ---------- silnice ----------
+     Data: window.SV_SILNICE z data.js (osy silnic z projektu ArcGIS Pro).
+     Stejně jako v ArcGIS dvě čáry přes sebe: světlý okraj (#e1e1e1) a šedý střed (K55 → #737373).
+     Šířka roste s přiblížením (silnice má ve hře asi 6–8 m), ale nikdy není tenčí než 2 px. */
+  map.createPane('silnice');
+  map.getPane('silnice').style.zIndex=390;             // pod pozemky (400), aby pozemky ležely na silnicích jako v ArcGIS
+  map.getPane('silnice').style.pointerEvents='none';
+  const roadRenderer=L.svg({pane:'silnice',padding:.5});
+  let roadCasing,roadCenter;
+  function roadWidths(){
+    const m=Math.pow(2,map.getZoom());                 // pixelů na 1 metr
+    const c=Math.max(2,6*m), k=c+Math.max(1.6,1.6*m);
+    return [k,c];
+  }
+  function addRoads(){
+    const gj=window.SV_SILNICE; if(!gj) return;
+    const [k,c]=roadWidths();
+    roadCasing=L.geoJSON(gj,{coordsToLatLng:ll,renderer:roadRenderer,interactive:false,style:{color:'#e1e1e1',weight:k,lineCap:'round',lineJoin:'round'}}).addTo(map);
+    roadCenter=L.geoJSON(gj,{coordsToLatLng:ll,renderer:roadRenderer,interactive:false,style:{color:'#737373',weight:c,lineCap:'round',lineJoin:'round'}}).addTo(map);
+  }
+  map.on('zoomend',()=>{ if(!roadCasing) return; const [k,c]=roadWidths(); roadCasing.setStyle({weight:k}); roadCenter.setStyle({weight:c}); });
+
+  /* ---------- ikony veřejných míst (jako na Google Mapách / Mapy.com) ----------
+     Data: window.SV_MISTA z data.js (body a ikony z mapy v ArcGIS Pro).
+     Ikony se nepřekrývají: po každém přiblížení/oddálení se rozmístí podle priority
+     (1 = nejdůležitější). Když se ikona nevejde, schová se a objeví se až po přiblížení.
+     Názvy u ikon nejsou – co ikona znamená, říká legenda (název se ukáže i po najetí myší). */
+  const places=L.layerGroup();
+  let poi=[];                                           // [{m, marker}]
+  function addPlaces(){
+    const ms=(window.SV_MISTA||[]).slice().sort((a,b)=>a.priorita-b.priorita);
+    ms.forEach(m=>{
+      const html='<span class="poi-c"><img src="'+esc(m.ikona)+'" alt=""></span>';
+      const marker=L.marker(ll([m.x,m.y]),{icon:L.divIcon({className:'poi',html,iconSize:[30,30],iconAnchor:[15,15]}),title:m.nazev,keyboard:true,riseOnHover:true});
+      marker.on('click',e=>{
+        L.DomEvent.stopPropagation(e);
+        let lay=null; if(lots) lots.eachLayer(l=>{ if(l.feature.properties.interni===m.lot) lay=l; });
+        if(lay) select(lay);
+      });
+      places.addLayer(marker);
+      poi.push({m,marker});
+    });
+    places.addTo(map);
+    declutter();
+  }
+  // rozmístění ikon bez překryvu: postupně podle priority, každá zabere obdélník na obrazovce
+  function declutter(){
+    if(!map.hasLayer(places)) return;
+    const taken=[], pad=3;
+    const free=r=>taken.every(t=>r.x2+pad<t.x1||r.x1-pad>t.x2||r.y2+pad<t.y1||r.y1-pad>t.y2);
+    poi.forEach(o=>{
+      const el=o.marker.getElement(); if(!el) return;
+      const p=map.latLngToContainerPoint(o.marker.getLatLng());
+      const icon={x1:p.x-15,y1:p.y-15,x2:p.x+15,y2:p.y+15};
+      const show=free(icon);
+      if(show) taken.push(icon);
+      el.style.display=show?'':'none';
+    });
+  }
+  map.on('zoomend resize viewreset',()=>setTimeout(declutter,0));
 
   /* ---------- názvy ulic (popisky podél silnic jako na OpenStreetMap) ----------
      Data: window.SV_ULICE z data.js (čáry silnic s názvem ulice).
@@ -1467,6 +1562,12 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 
   /* ---------- tlačítka pod zoomem: Vrstvy, Legenda, Celá obrazovka ----------
      Leaflet je naskládá pod tlačítka + a − (obojí je „topright“). */
+  // ikony do legendy (každá ikona jen jednou, s obecným názvem)
+  const LEG_IKONY=(()=>{
+    const seen={}, nm={'Horské jezírko':'Jezírko','Centrální park':'Park','Pláž':'Pláž','Bazén':'Bazén','Náměstí: divadlo, obchod s potravinami, knihkupectví':'Náměstí (divadlo, obchod, knihkupectví)'};
+    return (window.SV_MISTA||[]).slice().sort((a,b)=>a.priorita-b.priorita).filter(m=>!seen[m.ikona]&&(seen[m.ikona]=1))
+      .map(m=>'<span class="leg-poi"><img src="'+m.ikona+'" alt=""></span><span>'+(nm[m.nazev]||m.nazev)+'</span>').join('');
+  })();
   const Tools=L.Control.extend({options:{position:'topright'},onAdd(){
     const d=L.DomUtil.create('div','leaflet-control m-tools');
     // tři tlačítka pod sebou:
@@ -1477,18 +1578,24 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
       <div class="m-tool"><button type="button" id="b-lay" aria-expanded="false" aria-controls="p-lay" title="Vrstvy" aria-label="Vrstvy">
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
         <div class="m-pop" id="p-lay" hidden><h2>Vrstvy</h2><div class="toggles">
+          <label for="t-poi"><input type="checkbox" id="t-poi" checked> Ikony veřejných míst</label>
+          <label for="t-ul"><input type="checkbox" id="t-ul" checked> Názvy ulic</label>
+          <label for="t-road"><input type="checkbox" id="t-road" checked> Silnice</label>
           <label for="t-lots"><input type="checkbox" id="t-lots" checked> Pozemky</label>
-          <label for="t-bld"><input type="checkbox" id="t-bld" checked> Budovy</label>
-          <label for="t-ul"><input type="checkbox" id="t-ul" checked> Názvy ulic</label></div></div></div>
+          <label for="t-bld"><input type="checkbox" id="t-bld"> Budovy</label></div>
+          <h2 style="margin-top:12px">Podklad</h2><div class="toggles">
+          <label for="t-bm1"><input type="radio" name="podklad" id="t-bm1" value="relief" checked> Mapa (reliéf)</label>
+          <label for="t-bm2"><input type="radio" name="podklad" id="t-bm2" value="hra"> Textura ze hry</label></div></div></div>
       <div class="m-tool"><button type="button" id="b-leg" aria-expanded="false" aria-controls="p-leg" title="Legenda" aria-label="Legenda">
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="10" width="5" height="4" rx="1"/><rect x="3" y="16" width="5" height="4" rx="1"/><path d="M11 6h10M11 12h10M11 18h10"/></svg></button>
-        <div class="m-pop" id="p-leg" hidden><h2>Legenda</h2><div class="legend">
-          <span class="sw" style="background:var(--lot-house)"></span><span>Pozemek s domem</span>
-          <span class="sw" style="background:var(--lot-public)"></span><span>Veřejné místo</span>
-          <span class="sw" style="background:var(--lot-empty)"></span><span>Prázdný pozemek</span>
+        <div class="m-pop m-pop-leg" id="p-leg" hidden><h2>Legenda</h2><div class="legend">
+          <span class="sw sw-srafa"></span><span>Rodinný dům s domácností</span>
+          <span class="sw" style="background:#d9c3ad"></span><span>Rodinný dům bez obyvatel</span>
+          <span class="sw" style="background:#ffd980"></span><span>Prázdný pozemek</span>
+          <span class="sw" style="background:#bfd9e5"></span><span>Veřejné místo a budova</span>
+          <span class="sw sw-silnice"></span><span>Silnice</span>
           <hr class="leg-sep">
-          <span class="sw" style="background:var(--bld-house)"></span><span>Rodinný dům</span>
-          <span class="sw" style="background:var(--bld-public)"></span><span>Veřejná budova</span></div></div></div>
+          ${LEG_IKONY}</div></div></div>
       <div class="m-tool"><button type="button" id="b-fs" aria-pressed="false" title="Mapa na celou obrazovku" aria-label="Mapa na celou obrazovku">
         <svg class="i-open" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
         <svg class="i-close" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>`;
@@ -1516,6 +1623,18 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
     e.target.checked?lots.addTo(map):map.removeLayer(lots);
     if(e.target.checked&&blds&&map.hasLayer(blds)) blds.bringToFront();   // budovy zůstanou nad pozemky
   });
+  document.getElementById('t-poi').addEventListener('change',e=>{
+    e.target.checked?places.addTo(map):map.removeLayer(places);
+    if(e.target.checked) setTimeout(declutter,0);
+  });
+  document.getElementById('t-road').addEventListener('change',e=>{
+    if(!roadCasing) return;
+    [roadCasing,roadCenter].forEach(l=>e.target.checked?l.addTo(map):map.removeLayer(l));
+  });
+  document.querySelectorAll('input[name="podklad"]').forEach(r=>r.addEventListener('change',e=>{
+    Object.values(basemaps).forEach(b=>map.removeLayer(b));
+    basemaps[e.target.value].addTo(map); basemaps[e.target.value].bringToBack();
+  }));
   document.getElementById('t-ul').addEventListener('change',e=>{
     e.target.checked?streets.addTo(map):map.removeLayer(streets);
     if(e.target.checked) setTimeout(updateStreetNames,0);
@@ -1807,3 +1926,5 @@ main{display:flex;flex-direction:column;gap:10px;padding-block:6px 0}
 </script>
 </body>
 </html>
+
+</body></html>
